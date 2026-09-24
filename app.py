@@ -41,18 +41,17 @@ from recall_grid import BACKBONE_PROD, charger_backbone
 
 # Seuil de similarité en dessous duquel l'API ne présente pas de réponse. Mesuré sur 115
 # montures (evaluer.py --seuils), photos de requête jamais vues à l'entraînement de la tête :
-#     seuil 0.70    81 % de réponses, précision@1 = 0.81
-#     seuil 0.75    68 % de réponses, précision@1 = 0.87
-#     seuil 0.80    51 % de réponses, précision@1 = 0.90   <- retenu
-#     seuil 0.85    38 % de réponses, précision@1 = 0.96
-#     seuil 0.90    18 % de réponses, précision@1 = 1.00
-# Compromis : environ une recherche sur deux reçoit une réponse assumée, juste 9 fois sur 10,
-# et l'opticien confirme de toute façon en regardant la vignette. Monter le seuil si une erreur
-# coûte cher (commande fournisseur), le baisser pour couvrir plus de cas -- c'est un paramètre
-# de requête (?seuil=).
-# À remesurer quand le stock change d'échelle : la précision dépend du nombre de montures en
-# concurrence (recall@5 = 0.93 à 20 montures, 0.79 à 115).
-SEUIL_CONFIANCE = 0.80
+#     seuil 0.70    71 % de réponses, précision@1 = 0.92
+#     seuil 0.75    61 % de réponses, précision@1 = 0.96   <- retenu
+#     seuil 0.80    45 % de réponses, précision@1 = 0.96
+#     seuil 0.85    30 % de réponses, précision@1 = 0.97
+# 0.75 plutôt que 0.80 : précision identique à 0.01 près, mais un tiers de réponses en plus.
+# Monter le seuil si une erreur coûte cher (commande fournisseur), le baisser pour couvrir plus
+# de cas -- c'est un paramètre de requête (?seuil=).
+# À REMESURER à chaque changement de backbone ou de prétraitement : ce seuil a déjà dû passer
+# de 0.85 à 0.80 puis 0.75 en suivant ces changements. Et la précision dépend du nombre de
+# montures en concurrence (recall@5 = 0.91 à 20 montures, 0.83 à 115).
+SEUIL_CONFIANCE = 0.75
 
 
 # ---------------------------------------------------------------- modèles chargés

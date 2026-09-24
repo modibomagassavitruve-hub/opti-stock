@@ -46,13 +46,19 @@ BACKBONES = {
     "dinov2_large": {"famille": "dinov2", "modele": "facebook/dinov2-large", "pooling": "cls"},
 }
 
-# Backbone servi en production, mesuré sur les 115 montures réelles, avec tête de projection :
-# recall@5 0.544 et marge à décor équivalent +0.124, contre 0.497 / +0.091 pour dinov2-base et
-# 0.506 / +0.109 pour FashionCLIP. À noter : large est MOINS bon que base sans la tête
-# (rec@1 0.255 contre 0.302) -- ses features ne servent qu'une fois projetées.
+# Backbone servi en production. Mesuré sur 115 montures réelles, images NON recadrées, avec
+# tête de projection, moyenne sur 4 découpages (evaluer.py) :
+#     fashionclip    recall@5 = 0.841   rec@1 = 0.739   identité = 0.771   512 dimensions
+#     dinov2_large   recall@5 = 0.807   rec@1 = 0.713   identité = 0.741   1024 dimensions
+#     dinov2         recall@5 = 0.765
+#     clip           recall@5 = 0.765
+# FashionCLIP gagne sur tout, avec un modèle deux fois plus léger. Le classement s'inverse
+# selon qu'on recadre ou non : sur images recadrées dinov2_large l'emportait. FashionCLIP est
+# entraîné sur des photos produit e-commerce -- des scènes entières -- là où DINOv2 excelle sur
+# des objets détourés ; comparer des backbones sans fixer le prétraitement n'a pas de sens.
 # Le catalogue et l'API DOIVENT utiliser le même : construire_catalogue.py l'inscrit dans le
 # .npz, charger_modeles refuse un catalogue bâti avec un autre.
-BACKBONE_PROD = "dinov2_large"
+BACKBONE_PROD = "fashionclip"
 
 
 def charger_backbone(nom: str, device: str):
