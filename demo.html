@@ -2,66 +2,238 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<title>Opti-Stock — Démo</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opti-Stock</title>
 <style>
-  body { font-family: -apple-system, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 16px; color: #222; }
-  h1 { font-size: 1.4rem; }
-  section { border: 1px solid #ddd; border-radius: 8px; padding: 16px; margin-bottom: 24px; }
-  input[type=file] { display: block; margin: 12px 0; }
-  button { padding: 8px 16px; cursor: pointer; }
-  pre { background: #f5f5f5; padding: 12px; border-radius: 6px; overflow-x: auto; white-space: pre-wrap; }
-  .erreur { color: #b00020; }
-  label { font-size: 0.9rem; color: #555; }
+  /* Fond ET texte définis explicitement : sans fond déclaré, le navigateur en thème sombre
+     peint un fond noir derrière un texte sombre, et la page devient illisible. */
+  :root {
+    --fond: #ffffff; --encre: #1a1a1a; --trait: #dcdcdc; --gris: #666;
+    --rouge: #b00020; --vert: #1b7f3b; --champ: #ffffff; --bouton: #fafafa;
+    --ok-fond: #e8f5ec; --ok-trait: #b6dfc4;
+    --doute-fond: #fff4e5; --doute-trait: #f0d5a8; --doute-encre: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fond: #17181a; --encre: #e8e8e8; --trait: #3a3c40; --gris: #a0a0a0;
+      --rouge: #ff6b6b; --vert: #5fd18a; --champ: #202226; --bouton: #26282c;
+      --ok-fond: #17331f; --ok-trait: #2d6b45;
+      --doute-fond: #33280f; --doute-trait: #6b5520; --doute-encre: #e8c46a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         max-width: 780px; margin: 0 auto; padding: 24px 16px 60px;
+         color: var(--encre); background: var(--fond); }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  .sous-titre { color: var(--gris); font-size: .9rem; margin-top: 0; }
+  section { border: 1px solid var(--trait); border-radius: 10px; padding: 18px; margin-bottom: 20px; }
+  h2 { font-size: 1.05rem; margin: 0 0 12px; }
+  label { font-size: .9rem; color: var(--gris); display: inline-block; margin-right: 12px; }
+  select, input[type=number], input[type=text] { padding: 5px 7px; border: 1px solid var(--trait);
+    border-radius: 6px; font-size: .9rem; background: var(--champ); color: var(--encre); }
+  input[type=file] { display: block; margin: 10px 0; font-size: .9rem; }
+  button { padding: 9px 18px; border: 1px solid var(--trait); background: var(--bouton);
+    color: var(--encre); border-radius: 7px; cursor: pointer; font-size: .92rem; }
+  button:hover:not(:disabled) { border-color: var(--gris); }
+  button:disabled { opacity: .5; cursor: default; }
+
+  .bandeau { padding: 11px 14px; border-radius: 8px; margin: 14px 0 10px; font-size: .92rem; }
+  .fiable { background: var(--ok-fond); border: 1px solid var(--ok-trait); color: var(--vert); }
+  .doute  { background: var(--doute-fond); border: 1px solid var(--doute-trait); color: var(--doute-encre); }
+
+  .grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+  .carte { border: 1px solid var(--trait); border-radius: 9px; overflow: hidden; cursor: pointer;
+    background: var(--champ); color: var(--encre); padding: 0; text-align: center; }
+  .carte:hover { border-color: #888; }
+  .carte.choisie { border-color: var(--vert); border-width: 2px; background: var(--ok-fond); }
+  /* contain, pas cover : certains recadrages sont des bandes allongees, et les rogner
+     davantage ne montrerait plus rien de la monture. */
+  .carte img { width: 100%; height: 110px; object-fit: contain; display: block;
+    background: var(--trait); }
+  .carte .nom { font-weight: 600; font-size: .9rem; padding: 7px 4px 1px; }
+  .carte .score { font-size: .78rem; color: var(--gris); padding-bottom: 8px; }
+
+  .aide { font-size: .85rem; color: var(--gris); margin: 10px 0 0; }
+  .erreur { color: var(--rouge); font-size: .9rem; }
+  code { background: var(--champ); border: 1px solid var(--trait); padding: 1px 5px;
+    border-radius: 4px; font-size: .85rem; }
+  table { border-collapse: collapse; font-size: .9rem; width: 100%; }
+  td { padding: 4px 10px 4px 0; }
+  td:first-child { color: var(--gris); }
 </style>
 </head>
 <body>
-<h1>Opti-Stock — démo</h1>
-<p>Adresse de l'API : <input id="api" value="http://localhost:8000" size="30"></p>
+
+<h1>Opti-Stock</h1>
+<p class="sous-titre">Identification de monture par photo — <span id="nbMarques"></span></p>
+<p><label>API <input type="text" id="api" value="" size="26" placeholder="(cette page)"></label>
+   <button onclick="connecter()">Connecter</button> <span id="etatApi" class="aide"></span></p>
 
 <section>
   <h2>Identifier une monture</h2>
-  <input type="file" id="photoMonture" accept="image/*">
-  <label>Nombre de résultats : <input type="number" id="k" value="5" min="1" max="20" style="width:4em"></label>
-  <button onclick="identifier()">Identifier</button>
-  <pre id="resultatIdentifier"></pre>
+  <input type="file" id="photo" accept="image/*" capture="environment">
+  <label>Marque
+    <select id="marque"><option value="">— toutes —</option></select>
+  </label>
+  <label>Résultats <input type="number" id="k" value="5" min="1" max="12" style="width:3.5em"></label>
+  <button id="btnIdentifier" onclick="identifier()">Identifier</button>
+  <div id="sortie"></div>
 </section>
 
 <section>
   <h2>Lire une étiquette</h2>
-  <input type="file" id="photoEtiquette" accept="image/*">
-  <button onclick="lireEtiquette()">Lire l'étiquette</button>
-  <pre id="resultatEtiquette"></pre>
+  <input type="file" id="photoEtiquette" accept="image/*" capture="environment">
+  <button onclick="lireEtiquette()">Lire</button>
+  <div id="sortieEtiquette"></div>
+</section>
+
+<section>
+  <h2>Fiabilité constatée</h2>
+  <p class="aide">Calculée sur les identifications que vous avez validées ci-dessus. C'est la
+     seule mesure prise dans vos conditions réelles.</p>
+  <button onclick="bilan()">Rafraîchir</button>
+  <div id="sortieBilan"></div>
 </section>
 
 <script>
-function apiUrl() { return document.getElementById('api').value.replace(/\/$/, ''); }
+let derniereReponse = null;
 
-async function envoyer(endpoint, fichierInput, zoneResultat, params = '') {
-  const fichier = fichierInput.files[0];
-  zoneResultat.textContent = '';
-  if (!fichier) { zoneResultat.textContent = 'Choisis une photo d\'abord.'; zoneResultat.className = 'erreur'; return; }
-  const donnees = new FormData();
-  donnees.append('photo', fichier);
-  zoneResultat.textContent = 'Calcul en cours...';
-  zoneResultat.className = '';
+// Vide = même origine que la page : l'API se sert elle-même via GET /
+const api = () => document.getElementById('api').value.trim().replace(/\/$/, '');
+const el  = (id) => document.getElementById(id);
+
+async function connecter() {
   try {
-    const reponse = await fetch(`${apiUrl()}${endpoint}${params}`, { method: 'POST', body: donnees });
-    const corps = await reponse.json();
-    if (!reponse.ok) throw new Error(corps.detail || reponse.statusText);
-    zoneResultat.textContent = JSON.stringify(corps, null, 2);
+    const r = await fetch(api() + '/marques');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const marques = (await r.json()).marques;
+    const select = el('marque');
+    select.innerHTML = '<option value="">— toutes —</option>';
+    marques.forEach(m => select.add(new Option(m, m)));
+    el('nbMarques').textContent = marques.length + ' marques au catalogue';
+    el('etatApi').textContent = 'connecté';
   } catch (e) {
-    zoneResultat.textContent = 'Erreur : ' + e.message;
-    zoneResultat.className = 'erreur';
+    el('etatApi').innerHTML = '<span class="erreur">injoignable — l\'API est-elle démarrée ?</span>';
   }
 }
 
-function identifier() {
-  const k = document.getElementById('k').value || 5;
-  envoyer('/identifier', document.getElementById('photoMonture'), document.getElementById('resultatIdentifier'), `?k=${k}`);
+async function identifier() {
+  const fichier = el('photo').files[0];
+  if (!fichier) { el('sortie').innerHTML = '<p class="erreur">Choisissez une photo.</p>'; return; }
+
+  const bouton = el('btnIdentifier');
+  bouton.disabled = true;
+  el('sortie').innerHTML = '<p class="aide">Analyse en cours…</p>';
+  try {
+    const form = new FormData();
+    form.append('photo', fichier);
+    const params = new URLSearchParams({ k: el('k').value });
+    if (el('marque').value) params.set('marque', el('marque').value);
+
+    const r = await fetch(api() + '/identifier?' + params, { method: 'POST', body: form });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    derniereReponse = await r.json();
+    afficher(derniereReponse);
+  } catch (e) {
+    el('sortie').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  } finally {
+    bouton.disabled = false;
+  }
 }
-function lireEtiquette() {
-  envoyer('/lire-etiquette', document.getElementById('photoEtiquette'), document.getElementById('resultatEtiquette'));
+
+function afficher(d) {
+  const r = d.resultats || [];
+  if (!r.length) { el('sortie').innerHTML = '<p class="aide">Catalogue vide.</p>'; return; }
+
+  // Une réponse que le modèle n'assume pas n'est jamais présentée comme une identification :
+  // sous le seuil, la première proposition est fausse 3 fois sur 4.
+  const bandeau = d.fiable
+    ? `<div class="bandeau fiable"><strong>${r[0].monture}</strong> — correspondance nette
+       (${r[0].similarite.toFixed(2)}). À confirmer d'un clic.</div>`
+    : `<div class="bandeau doute"><strong>Aucune correspondance certaine.</strong>
+       Voici les montures les plus proches ; si aucune ne convient, cherchez par l'étiquette.</div>`;
+
+  const filtre = d.marque_filtree
+    ? `<p class="aide">Recherche limitée à ${d.marque_filtree} — ${d.candidats} photos comparées.</p>`
+    : `<p class="aide">${d.candidats} photos comparées. Préciser la marque améliore nettement le résultat.</p>`;
+
+  const cartes = r.map(x => `
+    <button class="carte" onclick="valider(this,'${x.monture}')">
+      <img src="${api()}/monture/${encodeURIComponent(x.monture)}/photo" alt="" loading="lazy">
+      <div class="nom">${x.monture}</div>
+      <div class="score">${x.similarite.toFixed(3)}</div>
+    </button>`).join('');
+
+  el('sortie').innerHTML = bandeau + filtre +
+    `<div class="grille">${cartes}</div>
+     <p class="aide">Cliquez la bonne monture : chaque validation mesure la fiabilité réelle et
+        servira à améliorer le modèle.
+        <button style="padding:4px 10px;font-size:.85rem" onclick="valider(null,'')">Aucune ne correspond</button></p>
+     <div id="confirmation"></div>`;
 }
+
+async function valider(carte, monture) {
+  if (!derniereReponse || !derniereReponse.journal_id) return;
+  try {
+    const r = await fetch(api() + '/journal/' + derniereReponse.journal_id +
+                          '/choix?monture=' + encodeURIComponent(monture || 'aucune'),
+                          { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    document.querySelectorAll('.carte').forEach(c => c.classList.remove('choisie'));
+    if (carte) carte.classList.add('choisie');
+    el('confirmation').innerHTML = '<p class="aide">' +
+      (monture ? 'Enregistré : ' + monture : 'Enregistré : aucune correspondance') + '.</p>';
+  } catch (e) {
+    el('confirmation').innerHTML = '<p class="erreur">Enregistrement impossible : ' + e.message + '</p>';
+  }
+}
+
+async function lireEtiquette() {
+  const fichier = el('photoEtiquette').files[0];
+  if (!fichier) { el('sortieEtiquette').innerHTML = '<p class="erreur">Choisissez une photo.</p>'; return; }
+  el('sortieEtiquette').innerHTML = '<p class="aide">Lecture…</p>';
+  try {
+    const form = new FormData();
+    form.append('photo', fichier);
+    const r = await fetch(api() + '/lire-etiquette', { method: 'POST', body: form });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    const champs = [['Marque', d.marque], ['Référence', d.reference], ['Coloris', d.coloris_code],
+                    ['Calibre', d.calibre], ['Pont', d.pont], ['Branche', d.branche]]
+                   .filter(([, v]) => v);
+    el('sortieEtiquette').innerHTML = champs.length
+      ? '<table>' + champs.map(([k, v]) => `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`).join('') +
+        `</table><p class="aide">Texte lu : <code>${d.texte_brut || '(rien)'}</code></p>`
+      : `<p class="aide">Rien de lisible. Texte brut : <code>${d.texte_brut || '(vide)'}</code><br>
+         Cadrez la branche de près, bien éclairée.</p>`;
+  } catch (e) {
+    el('sortieEtiquette').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+async function bilan() {
+  try {
+    const d = await fetch(api() + '/journal/bilan').then(r => r.json());
+    if (!d.validees) {
+      el('sortieBilan').innerHTML = `<p class="aide">${d.predictions || 0} identification(s),
+        aucune validée pour l'instant. Aucun chiffre ne peut être annoncé sans vos validations.</p>`;
+      return;
+    }
+    el('sortieBilan').innerHTML = `<table>
+      <tr><td>Identifications validées</td><td><strong>${d.validees}</strong></td></tr>
+      <tr><td>Bonne monture en 1re position</td><td><strong>${(d['recall@1'] * 100).toFixed(0)} %</strong></td></tr>
+      <tr><td>Bonne monture dans les 5</td><td><strong>${(d['recall@5'] * 100).toFixed(0)} %</strong></td></tr>
+      ${d.precision_si_fiable !== null ? `<tr><td>Justesse quand l'appli est sûre</td>
+        <td><strong>${(d.precision_si_fiable * 100).toFixed(0)} %</strong>
+        sur ${d.marquees_fiables} cas</td></tr>` : ''}
+    </table>`;
+  } catch (e) {
+    el('sortieBilan').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+connecter();
 </script>
 </body>
 </html>

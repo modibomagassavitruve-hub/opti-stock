@@ -32,6 +32,7 @@ from typing import Callable
 import numpy as np
 from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 
 from journal import Journal, chronometre
@@ -64,6 +65,7 @@ class Modeles:
     emb_catalogue: np.ndarray   # (M, D_projete), déjà passés par la tête, normalisés
     labels_catalogue: np.ndarray  # (M,)
     marques_catalogue: np.ndarray | None = None  # (M,), "" quand la marque est inconnue
+    chemins_catalogue: np.ndarray | None = None  # (M,), pour servir une vignette au client
 
 
 def charger_modeles(
@@ -136,6 +138,7 @@ def charger_modeles(
         marques_connues=marques_connues,
         emb_catalogue=emb_catalogue, labels_catalogue=labels_catalogue,
         marques_catalogue=marques_catalogue,
+        chemins_catalogue=d["chemins"] if "chemins" in d else None,
     )
 
 
@@ -203,6 +206,28 @@ def lire_etiquette(image: Image.Image, modeles: Modeles) -> dict:
     }
 
 
+RATIO_MONTURE = 2.2  # une monture vue de face, bien recadrée, est ~2 fois plus large que haute
+
+
+def _photo_la_plus_lisible(chemins: list[Path]) -> Path:
+    """Choisit la photo qui montre le mieux la monture, pour que l'opticien la reconnaisse.
+
+    Le détecteur produit parfois des recadrages inexploitables -- bandes très allongées ou
+    fragments minuscules (mesuré : 28 % des recadrages ont un rapport de côtés supérieur à 3).
+    On préfère donc la photo dont la forme se rapproche d'une monture vue de face, en écartant
+    les vignettes trop petites pour être lues."""
+    def defaut(chemin: Path) -> tuple:
+        try:
+            with Image.open(chemin) as im:
+                l, h = im.size
+        except Exception:
+            return (float("inf"), 0)
+        ratio = max(l / h, h / l)
+        return (abs(ratio - RATIO_MONTURE), -(l * h) if l * h >= 50_000 else 0)
+
+    return min(chemins, key=defaut)
+
+
 def _lire_image_uploadee(donnees: bytes) -> Image.Image:
     try:
         # exif_transpose : les photos de téléphone arrivent non pivotées, avec un tag EXIF.
@@ -252,6 +277,16 @@ def sante() -> dict:
     return {"statut": "ok"}
 
 
+@app.get("/", include_in_schema=False)
+def route_interface() -> FileResponse:
+    """Sert l'interface depuis l'API : une seule adresse à ouvrir pour l'opticien, et pas de
+    requête inter-origine à autoriser."""
+    page = Path(__file__).parent / "demo.html"
+    if not page.is_file():
+        raise HTTPException(status_code=404, detail="demo.html introuvable")
+    return FileResponse(page, media_type="text/html")
+
+
 @app.post("/identifier")
 async def route_identifier(
     request: Request,
@@ -279,6 +314,34 @@ def route_choix(journal_id: str, monture: str = Query(..., description="La bonne
     if not JOURNAL.noter_choix(journal_id, monture):
         raise HTTPException(status_code=404, detail=f"Prédiction {journal_id} inconnue")
     return {"journal_id": journal_id, "monture_choisie": monture}
+
+
+@app.get("/marques")
+def route_marques(request: Request) -> dict:
+    """Marques présentes au catalogue, pour alimenter le filtre côté interface."""
+    m = _modeles(request)
+    if m.marques_catalogue is None:
+        return {"marques": []}
+    return {"marques": sorted({str(x).strip() for x in m.marques_catalogue if str(x).strip()})}
+
+
+@app.get("/monture/{label:path}/photo")
+def route_photo_monture(request: Request, label: str) -> FileResponse:
+    """Vignette d'une monture du catalogue, pour que l'opticien reconnaisse visuellement.
+
+    Le chemin n'est jamais construit à partir de l'entrée : on cherche `label` parmi les
+    étiquettes du catalogue et on sert le chemin qui y est associé. Une entrée fantaisiste ne
+    peut donc pas sortir du dossier de photos."""
+    m = _modeles(request)
+    if m.chemins_catalogue is None:
+        raise HTTPException(status_code=404, detail="Catalogue sans chemins de photos")
+
+    correspond = [Path(str(c)) for c, l in zip(m.chemins_catalogue, m.labels_catalogue)
+                  if str(l) == label]
+    correspond = [c for c in correspond if c.is_file()]
+    if not correspond:
+        raise HTTPException(status_code=404, detail=f"Monture {label} inconnue")
+    return FileResponse(_photo_la_plus_lisible(correspond), media_type="image/jpeg")
 
 
 @app.get("/journal/bilan")

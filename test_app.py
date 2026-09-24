@@ -179,6 +179,35 @@ def _fichier_image_valide() -> bytes:
     return buf.getvalue()
 
 
+def test_route_marques_alimente_le_filtre(client, monkeypatch):
+    client.app.state.modeles.marques_catalogue = np.array(["Osmose", "", "Maritza", "Osmose"])
+    assert client.get("/marques").json() == {"marques": ["Maritza", "Osmose"]}
+
+
+def test_route_marques_sans_metadonnees(client):
+    client.app.state.modeles.marques_catalogue = None
+    assert client.get("/marques").json() == {"marques": []}
+
+
+def test_photo_monture_sert_la_vignette(client, tmp_path):
+    image = tmp_path / "m.jpg"
+    Image.new("RGB", (8, 8)).save(image)
+    m = client.app.state.modeles
+    m.chemins_catalogue = np.array([str(image)] * len(m.labels_catalogue))
+    r = client.get(f"/monture/{m.labels_catalogue[0]}/photo")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "image/jpeg"
+
+
+def test_photo_monture_refuse_une_etiquette_inconnue(client, tmp_path):
+    """Le chemin n'est jamais construit depuis l'entrée : une valeur fantaisiste, y compris une
+    tentative de remontée de dossier, ne correspond à aucune étiquette du catalogue."""
+    m = client.app.state.modeles
+    m.chemins_catalogue = np.array(["/tmp/x.jpg"] * len(m.labels_catalogue))
+    assert client.get("/monture/inconnue/photo").status_code == 404
+    assert client.get("/monture/..%2F..%2Fetc%2Fpasswd/photo").status_code == 404
+
+
 def test_route_sante(client):
     assert client.get("/sante").json() == {"statut": "ok"}
 
