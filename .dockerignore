@@ -1,11 +1,14 @@
-data/kaggle_glasses/
-data/crops_full/
-data/crops/
-data/grille/
-data/mes_montures*/
-data/mes_montures_crops/
-# data/vignettes/ est CONSERVE : l interface en a besoin, et il ne pese que quelques Mo
+# L'image n'a besoin que de quoi SERVIR : le catalogue, la tête, son seuil et les vignettes.
+# Tout ce qui sert à les FABRIQUER (photos sources, jeux de comparaison) reste dehors.
+data/*
+!data/catalogue.npz
+!data/tete.pt
+!data/tete.json
+!data/vignettes/
+!data/montures.csv
+
 __pycache__/
 *.pyc
 .pytest_cache/
 .git/
+test_*.py

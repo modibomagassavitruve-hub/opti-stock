@@ -8,4 +8,6 @@ numpy
 pandas
 scipy
 easyocr
+# glasses-detector : seulement pour construire_catalogue.py --recadrage, option
+# mesurée comme dégradante et conservée pour comparaison. Pas requis pour servir.
 glasses-detector

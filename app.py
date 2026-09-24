@@ -24,6 +24,7 @@ Documentation interactive une fois lancé : http://localhost:8000/docs
 from __future__ import annotations
 
 import io
+import os
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -262,7 +263,12 @@ def _lire_image_uploadee(donnees: bytes) -> Image.Image:
 # CHARGEUR_MODELES est une variable de module (pas un appel direct dans lifespan) pour
 # pouvoir la remplacer par une version factice dans les tests, sans toucher au reste.
 CHARGEUR_MODELES: Callable[[], Modeles] = charger_modeles
-JOURNAL = Journal(Path("data/journal"))
+
+# Le journal accumule les identifications validées par l'opticien : c'est la seule mesure de
+# fiabilité prise en conditions réelles, et il se construit sur des semaines d'usage. En
+# conteneur, l'écrire dans l'image le ferait disparaître à chaque redéploiement -- d'où le
+# chemin configurable, à faire pointer vers un volume monté.
+JOURNAL = Journal(Path(os.environ.get("OPTI_STOCK_JOURNAL", "data/journal")))
 
 
 @asynccontextmanager
