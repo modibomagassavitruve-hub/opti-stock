@@ -1,0 +1,9 @@
+# Données : volumineuses et régénérables depuis les photos + les scripts.
+# Les CSV de métadonnées, eux, sont saisis à la main : ils sont versionnés (voir !data/*.csv).
+data/*
+!data/*.csv
+
+__pycache__/
+*.pyc
+.pytest_cache/
+.DS_Store
