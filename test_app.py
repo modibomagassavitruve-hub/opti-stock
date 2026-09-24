@@ -26,6 +26,29 @@ def test_recherche_topk_borne_k_a_la_taille_du_catalogue():
     assert len(res) == 2  # pas d'erreur même si k > taille du catalogue
 
 
+def test_seuil_vient_du_modele_pas_du_code(tmp_path, monkeypatch):
+    """Le seuil est calibré à l'entraînement et rangé à côté de la tête : une constante du code
+    se désynchroniserait du modèle servi, ce qui est déjà arrivé quatre fois."""
+    import json
+
+    catalogue = tmp_path / "catalogue.npz"
+    np.savez_compressed(catalogue, emb=np.eye(3, dtype="float32"),
+                        labels=np.array(["a", "b", "c"]),
+                        backbone=np.array(app_module.BACKBONE_PROD))
+    tete = tmp_path / "tete.pt"
+    tete.with_suffix(".json").write_text(json.dumps({"seuil_confiance": 0.123}), encoding="utf-8")
+
+    monkeypatch.setattr(app_module, "charger_backbone", lambda *a, **k: (lambda images: None))
+    monkeypatch.setattr("easyocr.Reader", lambda *a, **k: None)
+    m = app_module.charger_modeles(catalogue_path=catalogue, tete_path=tete)
+    assert m.seuil_confiance == 0.123
+
+
+def test_seuil_par_defaut_si_le_modele_nen_fournit_pas():
+    modeles = _faux_modeles()
+    assert modeles.seuil_confiance == app_module.SEUIL_PAR_DEFAUT
+
+
 def test_charger_modeles_refuse_un_catalogue_dun_autre_backbone(tmp_path):
     """Un catalogue encodé avec un autre backbone que les requêtes renverrait du bruit sans
     lever d'erreur : le démarrage doit échouer franchement plutôt que servir ça."""

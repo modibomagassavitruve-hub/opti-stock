@@ -152,20 +152,30 @@ def entrainer(emb_train, labels_train, emb_val, labels_val, dim_sortie=128, p=16
               device="cpu", seed=0, verbose=True,
               tete_initiale: TeteProjection | None = None) -> tuple[TeteProjection, dict]:
     """`tete_initiale` permet de reprendre une tête déjà entraînée (pré-entraînement sur un jeu
-    plus large avant spécialisation sur le stock réel) plutôt que de repartir de zéro."""
+    plus large avant spécialisation sur le stock réel) plutôt que de repartir de zéro.
+
+    `emb_train` accepte aussi un tableau (V, N, D) : V encodages de la même photo sous des
+    variations de prise de vue. Chaque élément du batch est alors tiré au hasard parmi ses
+    variantes, ce qui apprend à la tête à les ignorer."""
     torch.manual_seed(seed)
     rng = np.random.default_rng(seed)
 
+    emb_train = np.asarray(emb_train)
+    if emb_train.ndim == 2:
+        emb_train = emb_train[None]   # une seule vue : même chemin de code
+
     tete = (tete_initiale if tete_initiale is not None
-            else TeteProjection(emb_train.shape[1], dim_sortie=dim_sortie)).to(device)
+            else TeteProjection(emb_train.shape[2], dim_sortie=dim_sortie)).to(device)
     opt = torch.optim.Adam(tete.parameters(), lr=lr)
     emb_train_t = torch.tensor(emb_train, dtype=torch.float32, device=device)
     labels_train_int = encoder_labels(labels_train)
+    n_vues = emb_train_t.shape[0]
 
     meilleur_recall5, meilleur_etat, attente = -1.0, {k_: v.clone() for k_, v in tete.state_dict().items()}, 0
     for pas_i in range(1, pas + 1):
         idx = echantillonner_batch_pk(labels_train, p, k, rng)
-        batch_emb = tete(emb_train_t[idx])
+        vues = rng.integers(n_vues, size=len(idx))
+        batch_emb = tete(emb_train_t[vues, idx])
         batch_labels = torch.tensor(labels_train_int[idx], device=device)
         perte = perte_supcon(batch_emb, batch_labels, temperature)
 

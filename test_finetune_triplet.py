@@ -214,6 +214,26 @@ def evaluer_recall_local(emb, labels):
     return evaluer_recall(emb, labels)["recall"]
 
 
+def test_entrainer_accepte_plusieurs_vues_par_photo():
+    """Chaque photo peut être fournie sous plusieurs encodages (variations de prise de vue).
+    L'entraînement doit alors piocher au hasard parmi les vues, sans changer de contrat."""
+    emb, labels = _dataset_synthetique(n_classes=20, n_par_classe=5, seed=4)
+    classes = sorted(set(labels))
+    mt = np.isin(labels, classes[:14])
+    mv = np.isin(labels, classes[14:])
+
+    rng = np.random.default_rng(0)
+    bruitees = emb[mt] + rng.normal(scale=0.05, size=emb[mt].shape).astype("float32")
+    vues = np.stack([emb[mt], bruitees])     # (2 vues, N, D)
+
+    tete, _ = entrainer(vues, labels[mt], emb[mv], labels[mv], dim_sortie=16, p=10, k=3,
+                        pas=200, lr=2e-3, device="cpu", seed=0, verbose=False)
+    with torch.no_grad():
+        sortie = tete(torch.tensor(emb, dtype=torch.float32)).numpy()
+    assert sortie.shape == (len(emb), 16)
+    assert etalement(sortie) > SEUIL_EFFONDREMENT
+
+
 def test_entrainer_ne_renvoie_jamais_une_tete_effondree():
     """Régression : l'arrêt anticipé sélectionnait sur le seul recall@5, qui reste trompeusement
     correct sur une tête effondrée -- elle était donc sauvegardée puis servie en production."""

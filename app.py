@@ -39,19 +39,12 @@ from journal import Journal, chronometre
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, charger_backbone
 
-# Seuil de similarité en dessous duquel l'API ne présente pas de réponse. Mesuré sur 115
-# montures (evaluer.py --seuils), photos de requête jamais vues à l'entraînement de la tête :
-#     seuil 0.70    71 % de réponses, précision@1 = 0.92
-#     seuil 0.75    61 % de réponses, précision@1 = 0.96   <- retenu
-#     seuil 0.80    45 % de réponses, précision@1 = 0.96
-#     seuil 0.85    30 % de réponses, précision@1 = 0.97
-# 0.75 plutôt que 0.80 : précision identique à 0.01 près, mais un tiers de réponses en plus.
-# Monter le seuil si une erreur coûte cher (commande fournisseur), le baisser pour couvrir plus
-# de cas -- c'est un paramètre de requête (?seuil=).
-# À REMESURER à chaque changement de backbone ou de prétraitement : ce seuil a déjà dû passer
-# de 0.85 à 0.80 puis 0.75 en suivant ces changements. Et la précision dépend du nombre de
-# montures en concurrence (recall@5 = 0.91 à 20 montures, 0.83 à 115).
-SEUIL_CONFIANCE = 0.75
+# Seuil de repli, utilisé seulement si la tête n'apporte pas le sien. entrainer_tete.py calibre
+# le seuil à chaque entraînement et l'écrit à côté du modèle (data/tete.json), car sa bonne
+# valeur dépend de la distribution des scores -- laquelle change avec le backbone, le
+# prétraitement et l'augmentation. Écrit en dur, il a dû être corrigé à la main quatre fois et
+# restait faux entre-temps, sans que rien ne le signale.
+SEUIL_PAR_DEFAUT = 0.80
 
 
 # ---------------------------------------------------------------- modèles chargés
@@ -67,6 +60,7 @@ class Modeles:
     marques_connues: list[str]
     emb_catalogue: np.ndarray   # (M, D_projete), déjà passés par la tête, normalisés
     labels_catalogue: np.ndarray  # (M,)
+    seuil_confiance: float = SEUIL_PAR_DEFAUT   # calibré à l'entraînement, lu dans tete.json
     marques_catalogue: np.ndarray | None = None  # (M,), "" quand la marque est inconnue
     chemins_catalogue: np.ndarray | None = None  # (M,), pour servir une vignette au client
 
@@ -111,6 +105,16 @@ def charger_modeles(
             f"l'API encode avec '{BACKBONE_PROD}'. Relancer construire_catalogue.py."
         )
 
+    # Seuil calibré lors de l'entraînement, à côté du modèle. Sa bonne valeur dépend de la
+    # distribution des scores de CETTE tête : la lire ici évite qu'une constante du code se
+    # désynchronise du modèle servi.
+    seuil = SEUIL_PAR_DEFAUT
+    fichier_seuil = tete_path.with_suffix(".json")
+    if fichier_seuil.exists():
+        import json
+
+        seuil = float(json.loads(fichier_seuil.read_text(encoding="utf-8"))["seuil_confiance"])
+
     if tete_path.exists():
         tete_module = TeteProjection(d["emb"].shape[1], dim_sortie=dim_sortie).to(device)
         tete_module.load_state_dict(torch.load(tete_path, map_location=device))
@@ -142,6 +146,7 @@ def charger_modeles(
         recadrer=recadrer, embedder=embedder, tete=tete, ocr=ocr,
         marques_connues=marques_connues,
         emb_catalogue=emb_catalogue, labels_catalogue=labels_catalogue,
+        seuil_confiance=seuil,
         marques_catalogue=marques_catalogue,
         chemins_catalogue=d["chemins"] if "chemins" in d else None,
     )
@@ -171,12 +176,13 @@ def _masque_marque(modeles: Modeles, marque: str) -> np.ndarray | None:
 
 
 def identifier_monture(image: Image.Image, modeles: Modeles, k: int = 5,
-                        seuil: float = SEUIL_CONFIANCE, marque: str = "") -> dict:
+                        seuil: float | None = None, marque: str = "") -> dict:
     """`fiable` dit si la réponse mérite d'être présentée comme une identification. En dessous du
     seuil les candidats sont quand même renvoyés -- un humain peut reconnaître la bonne monture
     dans une liste que le modèle n'assume pas -- mais l'interface ne doit pas les présenter comme
     une réponse : sans ce garde-fou, la première proposition est fausse 3 fois sur 4, avec un
     score d'apparence crédible, ce qui peut faire commander la mauvaise référence."""
+    seuil = modeles.seuil_confiance if seuil is None else seuil
     recadree = modeles.recadrer(image)
     emb_brut = modeles.embedder([recadree])
     emb_projete = modeles.tete(emb_brut)[0]
@@ -297,8 +303,9 @@ async def route_identifier(
     request: Request,
     photo: UploadFile = File(..., description="Photo de la monture à identifier"),
     k: int = Query(5, ge=1, le=50, description="Nombre de résultats à renvoyer"),
-    seuil: float = Query(SEUIL_CONFIANCE, ge=0.0, le=1.0,
-                          description="En dessous, la réponse est marquée non fiable"),
+    seuil: float | None = Query(None, ge=0.0, le=1.0,
+                                description="En dessous, la réponse est marquée non fiable. "
+                                            "Par défaut : le seuil calibré à l'entraînement"),
     marque: str = Query("", description="Restreint la recherche à cette marque, si connue"),
 ) -> dict:
     donnees = await photo.read()

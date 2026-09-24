@@ -52,18 +52,25 @@ def separer_requetes(labels: np.ndarray, seed: int = 0) -> np.ndarray:
     return requete
 
 
-def entrainer_sans_les_requetes(emb, labels, catalogue, dim_sortie=128, pas=1500, seed=0):
+def entrainer_sans_les_requetes(emb, labels, catalogue, dim_sortie=128, pas=1500, seed=0,
+                                 variantes: np.ndarray | None = None):
     """Entraîne la tête sur le seul catalogue. Pas d'arrêt anticipé : aucune photo ne peut être
-    réservée pour la validation sans réintroduire une fuite."""
+    réservée pour la validation sans réintroduire une fuite.
+
+    `variantes` (V, N, D) reproduit l'augmentation utilisée en production. Sans elle, la mesure
+    ne décrirait pas le modèle réellement servi."""
     torch.manual_seed(seed)
+    vues = emb[catalogue][None] if variantes is None else np.concatenate(
+        [emb[catalogue][None], variantes[:, catalogue]])
     tete = TeteProjection(emb.shape[1], dim_sortie=dim_sortie)
     opt = torch.optim.Adam(tete.parameters(), lr=1e-3)
-    E = torch.tensor(emb[catalogue], dtype=torch.float32)
+    E = torch.tensor(vues, dtype=torch.float32)
     yi = encoder_labels(labels[catalogue])
     rng = np.random.default_rng(seed)
     for _ in range(pas):
         idx = echantillonner_batch_pk(labels[catalogue], 16, 3, rng)
-        perte = perte_supcon(tete(E[idx]), torch.tensor(yi[idx]))
+        v = rng.integers(E.shape[0], size=len(idx))
+        perte = perte_supcon(tete(E[v, idx]), torch.tensor(yi[idx]))
         opt.zero_grad(); perte.backward(); opt.step()
     return tete
 
@@ -94,6 +101,8 @@ def main() -> None:
     p.add_argument("--catalogue", type=Path, default=Path("data/catalogue.npz"))
     p.add_argument("--par-taille", action="store_true")
     p.add_argument("--seuils", action="store_true")
+    p.add_argument("--variantes", type=int, default=4,
+                    help="reproduit l'augmentation de entrainer_tete.py (0 pour l'ignorer)")
     p.add_argument("--seed", type=int, default=0)
     args = p.parse_args()
 
@@ -107,7 +116,13 @@ def main() -> None:
     print(f"{len(set(labels))} montures | {catalogue.sum()} photos au catalogue | "
           f"{requete.sum()} requêtes, jamais vues à l'entraînement")
 
-    tete = entrainer_sans_les_requetes(emb, labels, catalogue, seed=args.seed)
+    variantes = None
+    if args.variantes and "chemins" in d:
+        from entrainer_tete import encoder_variantes
+        print(f"encodage de {args.variantes} variantes par photo (comme à l'entraînement)…")
+        variantes = encoder_variantes(d["chemins"].astype(str), args.variantes, seed=args.seed)
+
+    tete = entrainer_sans_les_requetes(emb, labels, catalogue, seed=args.seed, variantes=variantes)
     e = _projeter(tete, emb, "cpu")
 
     brut = mesurer(emb, labels, ts, requete, catalogue)
