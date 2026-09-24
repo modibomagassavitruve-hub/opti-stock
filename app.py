@@ -34,6 +34,7 @@ from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from PIL import Image, ImageOps
 
+from journal import Journal, chronometre
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, boite_depuis_masque, charger_backbone
 
@@ -214,6 +215,7 @@ def _lire_image_uploadee(donnees: bytes) -> Image.Image:
 # CHARGEUR_MODELES est une variable de module (pas un appel direct dans lifespan) pour
 # pouvoir la remplacer par une version factice dans les tests, sans toucher au reste.
 CHARGEUR_MODELES: Callable[[], Modeles] = charger_modeles
+JOURNAL = Journal(Path("data/journal"))
 
 
 @asynccontextmanager
@@ -259,8 +261,31 @@ async def route_identifier(
                           description="En dessous, la réponse est marquée non fiable"),
     marque: str = Query("", description="Restreint la recherche à cette marque, si connue"),
 ) -> dict:
-    image = _lire_image_uploadee(await photo.read())
-    return identifier_monture(image, _modeles(request), k, seuil, marque)
+    donnees = await photo.read()
+    image = _lire_image_uploadee(donnees)
+    horloge = chronometre()
+    resultat = identifier_monture(image, _modeles(request), k, seuil, marque)
+    resultat["journal_id"] = JOURNAL.enregistrer(
+        type_prediction="similarite", resultat=resultat, version=BACKBONE_PROD,
+        photo=donnees, latence_ms=horloge(),
+    )
+    return resultat
+
+
+@app.post("/journal/{journal_id}/choix")
+def route_choix(journal_id: str, monture: str = Query(..., description="La bonne monture")) -> dict:
+    """Déclare la bonne réponse pour une prédiction. C'est ce qui transforme un usage en cas de
+    test étiqueté : photo réelle, conditions réelles, vérité terrain humaine."""
+    if not JOURNAL.noter_choix(journal_id, monture):
+        raise HTTPException(status_code=404, detail=f"Prédiction {journal_id} inconnue")
+    return {"journal_id": journal_id, "monture_choisie": monture}
+
+
+@app.get("/journal/bilan")
+def route_bilan() -> dict:
+    """recall@k mesuré sur les usages réels validés par l'opticien -- le seul chiffre qui ne
+    souffre d'aucun des biais du jeu de photos initial."""
+    return JOURNAL.bilan()
 
 
 @app.post("/lire-etiquette")
