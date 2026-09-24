@@ -26,6 +26,30 @@ def test_recherche_topk_borne_k_a_la_taille_du_catalogue():
     assert len(res) == 2  # pas d'erreur même si k > taille du catalogue
 
 
+def test_tete_perimee_signalee_au_demarrage(tmp_path, monkeypatch, capsys):
+    """Catalogue reconstruit sans réentraîner la tête : rien n'échoue (les dimensions restent
+    compatibles) mais la tête ignore les montures ajoutées et son seuil est périmé."""
+    import os
+    import time
+
+    tete = tmp_path / "tete.pt"
+    tete.write_bytes(b"")
+    time.sleep(0.01)
+    catalogue = tmp_path / "catalogue.npz"
+    np.savez_compressed(catalogue, emb=np.eye(3, dtype="float32"),
+                        labels=np.array(["a", "b", "c"]),
+                        backbone=np.array(app_module.BACKBONE_PROD))
+    os.utime(tete, (0, 0))  # tête nettement plus ancienne que le catalogue
+
+    monkeypatch.setattr(app_module, "charger_backbone", lambda *a, **k: (lambda images: None))
+    monkeypatch.setattr("easyocr.Reader", lambda *a, **k: None)
+    monkeypatch.setattr("torch.load", lambda *a, **k: {})
+    monkeypatch.setattr("finetune_triplet.TeteProjection.load_state_dict", lambda self, e: None)
+
+    app_module.charger_modeles(catalogue_path=catalogue, tete_path=tete)
+    assert "ATTENTION" in capsys.readouterr().out
+
+
 def test_seuil_vient_du_modele_pas_du_code(tmp_path, monkeypatch):
     """Le seuil est calibré à l'entraînement et rangé à côté de la tête : une constante du code
     se désynchroniserait du modèle servi, ce qui est déjà arrivé quatre fois."""

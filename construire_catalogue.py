@@ -28,6 +28,7 @@ import argparse
 from pathlib import Path
 
 import numpy as np
+from PIL import Image
 
 from recall_clip import choisir_device, lister_images, ouvrir_image
 from recall_grid import BACKBONE_PROD, charger_backbone, recadrer_dossier
@@ -59,6 +60,51 @@ def lire_metadonnees(chemin: Path | None, montures: set[str]) -> dict[str, str]:
     renseignees = sum(1 for v in marques.values() if v)
     print(f"[métadonnées] marque connue pour {renseignees}/{len(marques)} montures")
     return marques
+
+
+RATIO_MONTURE = 2.2   # une monture vue de face occupe un cadre ~2 fois plus large que haut
+COTE_VIGNETTE = 420
+
+
+def _forme_utilisable(chemin: Path) -> tuple:
+    """Clé de tri : d'abord la forme la plus proche d'une monture de face, puis la plus grande.
+    Sert à choisir, parmi les photos d'une monture, celle où l'opticien la reconnaîtra."""
+    try:
+        with Image.open(chemin) as im:
+            l, h = im.size
+    except Exception:
+        return (float("inf"), 0)
+    return (abs(max(l / h, h / l) - RATIO_MONTURE), -(l * h))
+
+
+def generer_vignettes(chemins: np.ndarray, labels: np.ndarray, dossier: Path) -> int:
+    """Écrit une petite vignette par monture, pour l'interface.
+
+    Sans elles, l'API servirait les photos d'origine : ~2 Mo chacune, soit une dizaine de Mo par
+    recherche, et elles sont exclues de l'image Docker. Une vignette de 420 px pèse ~40 Ko et
+    voyage avec le catalogue."""
+    dossier.mkdir(parents=True, exist_ok=True)
+    for ancienne in dossier.glob("*.jpg"):
+        ancienne.unlink()
+
+    echecs = 0
+    for label in sorted(set(labels.tolist())):
+        candidats = [Path(c) for c, l in zip(chemins, labels) if l == label]
+        candidats = [c for c in candidats if c.is_file()]
+        if not candidats:
+            continue
+        try:
+            im = ouvrir_image(min(candidats, key=_forme_utilisable))
+            im.thumbnail((COTE_VIGNETTE, COTE_VIGNETTE))
+            im.save(dossier / f"{label}.jpg", quality=82)
+        except Exception:
+            # Une vignette est cosmétique : son échec ne doit pas empêcher la construction du
+            # catalogue, qui est ce dont l'API a réellement besoin. L'interface retombera sur
+            # la photo d'origine pour cette monture.
+            echecs += 1
+    if echecs:
+        print(f"[vignettes] {echecs} monture(s) sans vignette, l'interface servira l'original")
+    return len(list(dossier.glob("*.jpg")))
 
 
 def construire(
@@ -114,6 +160,9 @@ def construire(
 
     par_monture = lire_metadonnees(metadonnees, set(labels.tolist()))
     marques = np.array([par_monture.get(l, "") for l in labels])
+
+    n_vignettes = generer_vignettes(chemins_gardes, labels, sortie.parent / "vignettes")
+    print(f"{n_vignettes} vignettes écrites dans {sortie.parent / 'vignettes'}")
 
     sortie.parent.mkdir(parents=True, exist_ok=True)
     np.savez_compressed(sortie, emb=emb, labels=labels, chemins=chemins_gardes,

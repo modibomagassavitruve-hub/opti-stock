@@ -4,6 +4,7 @@ data/crops/
 data/grille/
 data/mes_montures*/
 data/mes_montures_crops/
+# data/vignettes/ est CONSERVE : l interface en a besoin, et il ne pese que quelques Mo
 __pycache__/
 *.pyc
 .pytest_cache/

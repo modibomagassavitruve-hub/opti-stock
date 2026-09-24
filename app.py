@@ -46,6 +46,9 @@ from recall_grid import BACKBONE_PROD, charger_backbone
 # restait faux entre-temps, sans que rien ne le signale.
 SEUIL_PAR_DEFAUT = 0.80
 
+# Vignettes produites par construire_catalogue.py, servies à l'interface.
+DOSSIER_VIGNETTES = Path("data/vignettes")
+
 
 # ---------------------------------------------------------------- modèles chargés
 @dataclass
@@ -114,6 +117,14 @@ def charger_modeles(
         import json
 
         seuil = float(json.loads(fichier_seuil.read_text(encoding="utf-8"))["seuil_confiance"])
+
+    # Une tête plus ancienne que le catalogue a été entraînée sans les montures ajoutées depuis,
+    # et son seuil est calibré sur un stock qui n'existe plus. Rien n'échoue -- les dimensions
+    # restent compatibles -- donc seul un avertissement peut l'attraper.
+    if tete_path.exists() and tete_path.stat().st_mtime < catalogue_path.stat().st_mtime:
+        print(f"[ATTENTION] {tete_path} est plus ancienne que {catalogue_path}. La tête ignore "
+              f"les montures ajoutées depuis et son seuil de confiance est périmé. "
+              f"Relancer : python entrainer_tete.py")
 
     if tete_path.exists():
         tete_module = TeteProjection(d["emb"].shape[1], dim_sortie=dim_sortie).to(device)
@@ -341,19 +352,28 @@ def route_marques(request: Request) -> dict:
 def route_photo_monture(request: Request, label: str) -> FileResponse:
     """Vignette d'une monture du catalogue, pour que l'opticien reconnaisse visuellement.
 
-    Le chemin n'est jamais construit à partir de l'entrée : on cherche `label` parmi les
-    étiquettes du catalogue et on sert le chemin qui y est associé. Une entrée fantaisiste ne
-    peut donc pas sortir du dossier de photos."""
+    Le chemin n'est jamais construit à partir de l'entrée : `label` doit figurer parmi les
+    étiquettes du catalogue, et on sert alors un chemin établi côté serveur. Une valeur
+    fantaisiste, y compris une tentative de remontée de dossier, ne correspond à aucune
+    étiquette et reçoit un 404."""
     m = _modeles(request)
-    if m.chemins_catalogue is None:
-        raise HTTPException(status_code=404, detail="Catalogue sans chemins de photos")
-
-    correspond = [Path(str(c)) for c, l in zip(m.chemins_catalogue, m.labels_catalogue)
-                  if str(l) == label]
-    correspond = [c for c in correspond if c.is_file()]
-    if not correspond:
+    if label not in {str(l) for l in m.labels_catalogue}:
         raise HTTPException(status_code=404, detail=f"Monture {label} inconnue")
-    return FileResponse(_photo_la_plus_lisible(correspond), media_type="image/jpeg")
+
+    # Vignette produite par construire_catalogue.py : ~40 Ko contre ~2 Mo pour l'originale,
+    # et elle accompagne le catalogue là où les photos sources ne sont pas déployées.
+    vignette = DOSSIER_VIGNETTES / f"{label}.jpg"
+    if vignette.is_file():
+        return FileResponse(vignette, media_type="image/jpeg")
+
+    if m.chemins_catalogue is not None:
+        sources = [Path(str(c)) for c, l in zip(m.chemins_catalogue, m.labels_catalogue)
+                   if str(l) == label]
+        sources = [c for c in sources if c.is_file()]
+        if sources:
+            return FileResponse(_photo_la_plus_lisible(sources), media_type="image/jpeg")
+
+    raise HTTPException(status_code=404, detail=f"Aucune image pour la monture {label}")
 
 
 @app.get("/journal/bilan")

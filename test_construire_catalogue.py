@@ -65,6 +65,36 @@ def test_catalogue_enregistre_les_marques(tmp_path, monkeypatch):
     assert {l: m for l, m in zip(d["labels"], d["marques"])} == {"m1": "Osmose", "m2": ""}
 
 
+def test_vignettes_generees_une_par_monture(tmp_path):
+    from PIL import Image
+
+    racine = tmp_path / "photos"
+    chemins, labels = [], []
+    for monture, (l, h) in {"m1": (800, 360), "m2": (300, 300)}.items():
+        (racine / monture).mkdir(parents=True)
+        for i in range(2):
+            c = racine / monture / f"p{i}.jpg"
+            Image.new("RGB", (l + i * 50, h)).save(c)
+            chemins.append(str(c)); labels.append(monture)
+
+    dossier = tmp_path / "vignettes"
+    assert cc.generer_vignettes(np.array(chemins), np.array(labels), dossier) == 2
+    for monture in ("m1", "m2"):
+        with Image.open(dossier / f"{monture}.jpg") as im:
+            assert max(im.size) <= cc.COTE_VIGNETTE
+
+
+def test_vignette_illisible_nempeche_pas_la_construction(tmp_path):
+    """Une vignette est cosmétique : son échec ne doit pas priver l'API de son catalogue."""
+    racine = tmp_path / "photos"
+    (racine / "m1").mkdir(parents=True)
+    casse = racine / "m1" / "casse.jpg"
+    casse.write_bytes(b"pas une image")
+
+    assert cc.generer_vignettes(np.array([str(casse)]), np.array(["m1"]),
+                                 tmp_path / "vignettes") == 0
+
+
 def test_racine_vide_ne_produit_rien(tmp_path):
     racine = tmp_path / "mes_montures"
     racine.mkdir()
