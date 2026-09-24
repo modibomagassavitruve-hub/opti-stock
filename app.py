@@ -37,18 +37,22 @@ from PIL import Image, ImageOps
 
 from journal import Journal, chronometre
 from parse_etiquette import parse_etiquette
-from recall_grid import BACKBONE_PROD, boite_depuis_masque, charger_backbone
+from recall_grid import BACKBONE_PROD, charger_backbone
 
 # Seuil de similarité en dessous duquel l'API ne présente pas de réponse. Mesuré sur 115
-# montures, avec des photos de requête jamais vues à l'entraînement de la tête :
-#     sans seuil   100 % de réponses, précision@5 = 0.35
-#     seuil 0.80    20 % de réponses, précision@5 = 0.79
-#     seuil 0.85    12 % de réponses, précision@5 = 0.86
-# Le seuil n'a de sens qu'avec la tête de projection : sur les embeddings bruts du backbone les
-# scores ne sont pas calibrés (précision@1 plafonne à 0.58 même en ne répondant que 10 % du
-# temps). À remesurer quand le stock change d'échelle -- la précision dépend du nombre de
-# montures en concurrence.
-SEUIL_CONFIANCE = 0.85
+# montures (evaluer.py --seuils), photos de requête jamais vues à l'entraînement de la tête :
+#     seuil 0.70    81 % de réponses, précision@1 = 0.81
+#     seuil 0.75    68 % de réponses, précision@1 = 0.87
+#     seuil 0.80    51 % de réponses, précision@1 = 0.90   <- retenu
+#     seuil 0.85    38 % de réponses, précision@1 = 0.96
+#     seuil 0.90    18 % de réponses, précision@1 = 1.00
+# Compromis : environ une recherche sur deux reçoit une réponse assumée, juste 9 fois sur 10,
+# et l'opticien confirme de toute façon en regardant la vignette. Monter le seuil si une erreur
+# coûte cher (commande fournisseur), le baisser pour couvrir plus de cas -- c'est un paramètre
+# de requête (?seuil=).
+# À remesurer quand le stock change d'échelle : la précision dépend du nombre de montures en
+# concurrence (recall@5 = 0.93 à 20 montures, 0.79 à 115).
+SEUIL_CONFIANCE = 0.80
 
 
 # ---------------------------------------------------------------- modèles chargés
@@ -78,20 +82,22 @@ def charger_modeles(
     bas), jamais par requête."""
     import torch
     from easyocr import Reader
-    from glasses_detector import GlassesSegmenter
 
     from finetune_triplet import TeteProjection
 
     device = "cuda" if torch.cuda.is_available() else ("mps" if torch.backends.mps.is_available() else "cpu")
 
     embedder = charger_backbone(BACKBONE_PROD, device)
-    segmenter = GlassesSegmenter(kind="frames", device=device)
     lecteur_ocr = Reader(["fr", "en"], gpu=(device != "cpu"))
 
     def recadrer(image: Image.Image) -> Image.Image:
-        masque = np.array(segmenter.predict(image, format="mask"))
-        boite = boite_depuis_masque(masque)
-        return image.crop(boite) if boite is not None else image
+        # Le recadrage sur la monture détectée est DÉSACTIVÉ : mesuré sur 115 montures et
+        # 3 découpages, il fait chuter le recall@5 de 0.80 à 0.33. Le détecteur rate 29 % des
+        # photos (bandes très allongées, fragments minuscules) et ces recadrages détruisent
+        # l'information, alors que l'image entière contient toujours la monture.
+        # Le catalogue est construit de la même façon (construire_catalogue.py) : requêtes et
+        # catalogue DOIVENT subir le même traitement, sinon les embeddings ne se comparent pas.
+        return image
 
     def ocr(image: Image.Image) -> str:
         return " ".join(lecteur_ocr.readtext(np.array(image), detail=0, paragraph=False))

@@ -59,7 +59,7 @@ def test_catalogue_enregistre_les_marques(tmp_path, monkeypatch):
     csv.write_text("monture,marque\nm1,Osmose\n", encoding="utf-8")
 
     sortie = tmp_path / "catalogue.npz"
-    cc.construire(racine, sortie, sans_recadrage=True, metadonnees=csv)
+    cc.construire(racine, sortie, recadrage=False, metadonnees=csv)
 
     d = np.load(sortie, allow_pickle=False)
     assert {l: m for l, m in zip(d["labels"], d["marques"])} == {"m1": "Osmose", "m2": ""}
@@ -68,7 +68,7 @@ def test_catalogue_enregistre_les_marques(tmp_path, monkeypatch):
 def test_racine_vide_ne_produit_rien(tmp_path):
     racine = tmp_path / "mes_montures"
     racine.mkdir()
-    resume = cc.construire(racine, tmp_path / "catalogue.npz", sans_recadrage=True)
+    resume = cc.construire(racine, tmp_path / "catalogue.npz", recadrage=False)
     assert resume is None
     assert not (tmp_path / "catalogue.npz").exists()
 
@@ -78,7 +78,7 @@ def test_catalogue_contient_les_bonnes_cles_et_labels(tmp_path, monkeypatch):
     _faux_backbone(monkeypatch, par_chemin)
 
     sortie = tmp_path / "catalogue.npz"
-    resume = cc.construire(racine, sortie, sans_recadrage=True)
+    resume = cc.construire(racine, sortie, recadrage=False)
 
     assert resume == {"n_photos": 5, "n_montures": 2, "sortie": sortie}
     assert sortie.exists()
@@ -92,7 +92,7 @@ def test_catalogue_contient_les_bonnes_cles_et_labels(tmp_path, monkeypatch):
     assert (d["labels"] == "visionario_mikel03").sum() == 3
 
 
-def test_recadrage_appele_quand_pas_de_sans_recadrage(tmp_path, monkeypatch):
+def test_recadrage_appele_seulement_si_demande(tmp_path, monkeypatch):
     racine, par_chemin = _creer_montures(tmp_path, {"m1": 2})
     _faux_backbone(monkeypatch, par_chemin)
 
@@ -105,7 +105,7 @@ def test_recadrage_appele_quand_pas_de_sans_recadrage(tmp_path, monkeypatch):
 
     monkeypatch.setattr(cc, "recadrer_dossier", fausse_recadrer)
 
-    cc.construire(racine, tmp_path / "out.npz", sans_recadrage=False)
+    cc.construire(racine, tmp_path / "out.npz", recadrage=True)
 
     assert appels["chemins"]  # bien appelé avec la liste de photos
     assert appels["dossier_cache"] == racine.parent / "mes_montures_crops"
@@ -118,7 +118,7 @@ def test_identifiant_unique_par_dossier_pas_par_marque(tmp_path, monkeypatch):
     _faux_backbone(monkeypatch, par_chemin)
 
     sortie = tmp_path / "out.npz"
-    cc.construire(racine, sortie, sans_recadrage=True)
+    cc.construire(racine, sortie, recadrage=False)
 
     d = np.load(sortie, allow_pickle=False)
     assert set(d["labels"]) == {"talla_bogart2", "talla_gravita9015"}

@@ -15,7 +15,7 @@ entre ses photos (c'est lui qui sera renvoyé par /identifier comme résultat).
 
 Usage :
     python construire_catalogue.py
-    python construire_catalogue.py --racine data/mes_montures --sans-recadrage
+    python construire_catalogue.py --racine data/mes_montures --recadrage
 
 Ajout d'une nouvelle monture au stock : dépose son dossier de photos sous --racine, puis
 relance ce script (pas de mise à jour incrémentale pour l'instant, volontairement simple tant
@@ -64,13 +64,20 @@ def lire_metadonnees(chemin: Path | None, montures: set[str]) -> dict[str, str]:
 def construire(
     racine: Path,
     sortie: Path,
-    sans_recadrage: bool = False,
+    recadrage: bool = False,
     batch: int = 16,
     dossier_crops: Path | None = None,
     metadonnees: Path | None = None,
 ) -> dict | None:
     """Construit le catalogue et l'écrit dans `sortie` (mêmes clés que attend app.py :
-    emb, labels). Retourne un résumé, ou None si aucune photo n'a été trouvée."""
+    emb, labels). Retourne un résumé, ou None si aucune photo n'a été trouvée.
+
+    `recadrage` est désactivé par défaut : mesuré sur 115 montures et 3 découpages, recadrer
+    sur la monture détectée FAIT CHUTER le recall@5 de 0.80 à 0.33. Le détecteur rate 29 % des
+    photos -- bandes très allongées, fragments minuscules -- et ces recadrages détruisent
+    l'information. L'image entière, elle, contient toujours la monture. Vérifié par le contrôle
+    à décor équivalent : le signal d'identité est meilleur sans recadrage (0.74 contre 0.61),
+    donc le gain ne vient pas du fond partagé entre photos d'une même rafale."""
     df = lister_images(racine, profondeur=1)
     if df.empty:
         print(f"Aucune photo trouvée sous {racine}")
@@ -79,7 +86,7 @@ def construire(
     print(f"{len(df)} photos, {df['label'].nunique()} montures retenues")
 
     chemins = df["chemin"].tolist()
-    if not sans_recadrage:
+    if recadrage:
         cache = dossier_crops or (racine.parent / f"{racine.name}_crops")
         chemins = recadrer_dossier(chemins, racine, cache)
 
@@ -117,7 +124,9 @@ def construire(
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     p.add_argument("--racine", type=Path, default=Path("data/mes_montures"))
-    p.add_argument("--sans-recadrage", action="store_true")
+    p.add_argument("--recadrage", action="store_true",
+                    help="recadre sur la monture détectée ; dégrade fortement le recall "
+                         "(0.80 -> 0.33 mesuré), conservé pour comparaison")
     p.add_argument("--batch", type=int, default=16)
     p.add_argument("--sortie", type=Path, default=Path("data/catalogue.npz"))
     p.add_argument("--crops", type=Path, default=None,
@@ -126,7 +135,7 @@ def main() -> None:
                     help="CSV monture,marque -- permet de filtrer la recherche par marque")
     args = p.parse_args()
 
-    resume = construire(args.racine, args.sortie, args.sans_recadrage, args.batch, args.crops,
+    resume = construire(args.racine, args.sortie, args.recadrage, args.batch, args.crops,
                         args.metadonnees)
     if resume is None:
         return
