@@ -21,6 +21,11 @@ disparues, vendues sans saisie, ou rangées ailleurs.
 dans vos conditions réelles ; tous les autres chiffres de ce document viennent de photos
 prises en une seule séance, et sont donc optimistes.
 
+**Réseau.** Un client demande une monture que vous n'avez plus : cherchez-la chez un confrère
+inscrit et écrivez-lui directement. Vous choisissez monture par monture ce que vous exposez ;
+le reste de votre stock n'est jamais visible. Ce qui circule est la marque et la référence,
+jamais vos étiquettes internes — le « 50 » d'une boutique n'est pas celui d'une autre.
+
 ## Ajouter des montures
 
 ```bash
@@ -96,6 +101,7 @@ constante écrite en dur s'est périmée quatre fois.
 | `evaluer.py` | mesure sans fuite |
 | `journal.py` | collecte des identifications validées |
 | `inventaire.py` | sessions d'inventaire |
+| `reseau.py` | réseau entre opticiens : partage, recherche, messagerie |
 | `recall_grid.py` | backbone de production, comparaison de backbones |
 | `finetune_triplet.py` | tête de projection et sa perte |
 | `parse_etiquette.py` | lecture d'étiquette (OCR → champs) |
@@ -116,6 +122,19 @@ gain le plus accessible : le recall@5 passe de 0.79 à 0.86 quand la marque est 
 plate entre 10 et 80 montures d'entraînement. C'est utile pour couvrir le stock, pas pour la
 qualité.
 
-**Les modules 2 (inventaire) et 4 (recherche visuelle) du schéma sont faits.** Le module 3
-(réseau entre opticiens) ne l'est pas : il suppose plusieurs boutiques, des comptes, une
-authentification et de la modération — et il est intestable avec une seule boutique.
+**Le réseau n'a pas de véritable authentification.** Le jeton remis à l'inscription suffit à
+agir au nom d'une boutique : ni mot de passe, ni vérification d'e-mail ou de SIRET, et il est
+gardé dans le navigateur. Cela suffit à montrer le produit ; cela ne suffit pas à porter de
+vrais échanges entre entreprises — qui intercepte un jeton lit les messages d'une boutique et
+écrit en son nom. **Avant d'ouvrir le réseau à de vraies boutiques**, il faut au minimum :
+
+| | |
+|---|---|
+| Authentification externe | le schéma la délègue explicitement ; tout passe par `_boutique()` dans `app.py` |
+| HTTPS | le jeton circule en clair aujourd'hui |
+| CORS restreint | `allow_origins=["*"]` est là pour le développement |
+| Modération | les signalements sont conservés, pas traités |
+| RGPD | information, conservation, effacement — rien n'est prévu |
+
+Les quatre modules du schéma sont en place ; le module 3 reste celui qui demande ce travail
+avant mise en service, les trois autres ne concernent que la boutique elle-même.

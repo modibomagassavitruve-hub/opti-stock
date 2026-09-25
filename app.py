@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Callable
 
 import numpy as np
-from fastapi import FastAPI, File, HTTPException, Query, Request, UploadFile
+from fastapi import FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
@@ -40,6 +40,7 @@ from inventaire import Inventaire
 from journal import Journal, chronometre
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, charger_backbone
+from reseau import Reseau
 
 # Seuil de repli, utilisé seulement si la tête n'apporte pas le sien. entrainer_tete.py calibre
 # le seuil à chaque entraînement et l'écrit à côté du modèle (data/tete.json), car sa bonne
@@ -207,6 +208,15 @@ def identifier_monture(image: Image.Image, modeles: Modeles, k: int = 5,
     labels_cat = modeles.labels_catalogue if garde is None else modeles.labels_catalogue[garde]
 
     resultats = recherche_topk(emb_projete, emb_cat, labels_cat, k)
+
+    # La marque accompagne chaque résultat : elle permet d'enchaîner sur une recherche réseau
+    # (module 3) sans que l'opticien ait à la retrouver lui-même.
+    if modeles.marques_catalogue is not None:
+        marques = {str(l): str(m).strip() for l, m in zip(modeles.labels_catalogue,
+                                                           modeles.marques_catalogue)}
+        for r in resultats:
+            r["marque"] = marques.get(r["monture"], "")
+
     return {
         "resultats": resultats,
         "fiable": bool(resultats) and resultats[0]["similarite"] >= seuil,
@@ -272,6 +282,8 @@ CHARGEUR_MODELES: Callable[[], Modeles] = charger_modeles
 _DONNEES = Path(os.environ.get("OPTI_STOCK_JOURNAL", "data/journal"))
 JOURNAL = Journal(_DONNEES)
 INVENTAIRES = Inventaire(_DONNEES / "inventaires")
+# Le réseau porte des messages entre entreprises : il va dans le même volume persistant.
+RESEAU = Reseau(_DONNEES / "reseau.jsonl")
 
 
 @asynccontextmanager
@@ -449,3 +461,198 @@ async def route_lire_etiquette(
 ) -> dict:
     image = _lire_image_uploadee(await photo.read())
     return lire_etiquette(image, _modeles(request))
+
+
+# ---------------------------------------------------------------------------
+# Module 3 : réseau entre opticiens
+#
+# IDENTIFICATION DE DÉMONSTRATION. L'en-tête X-Boutique-Jeton suffit à agir au nom d'une
+# boutique : pas de mot de passe, pas de vérification d'e-mail ni de SIRET, et le jeton
+# circule en clair sans HTTPS en local. Cela suffit à montrer le parcours ; cela ne suffit
+# pas à porter de vrais échanges entre entreprises. Voir l'en-tête de reseau.py.
+# ---------------------------------------------------------------------------
+
+
+def _boutique(jeton: str | None) -> str:
+    """Identifie la boutique appelante, ou 401. Un seul endroit pour ce contrôle : c'est ici
+    qu'il faudra brancher l'authentification externe."""
+    if not jeton or (boutique := RESEAU.authentifier(jeton)) is None:
+        raise HTTPException(status_code=401, detail="Jeton de boutique invalide ou absent")
+    return boutique
+
+
+def _catalogue_partageable(request: Request) -> list[dict]:
+    """Les montures du catalogue local qui ont une marque, avec leur référence si elle est
+    connue. Une monture sans marque n'est identifiable par aucun confrère : l'étiquette locale
+    (« 50 ») n'a de sens que dans cette boutique."""
+    m = _modeles(request)
+    references = _references_catalogue()
+    marques_par_photo = (m.marques_catalogue if m.marques_catalogue is not None
+                         else [""] * len(m.labels_catalogue))
+
+    # Une monture par entrée, pas une par photo : le catalogue compte plusieurs vues de la même
+    # monture, et la lister cinq fois rendrait le choix des montures à partager illisible.
+    montures: dict[str, dict] = {}
+    for label, marque in zip(m.labels_catalogue, marques_par_photo):
+        if str(marque).strip() and str(label) not in montures:
+            montures[str(label)] = {"libelle": str(label), "marque": str(marque).strip(),
+                                     "reference": references.get(str(label), "")}
+    return sorted(montures.values(), key=lambda x: (x["marque"], x["libelle"]))
+
+
+def _references_catalogue() -> dict[str, str]:
+    """Références lues dans data/montures.csv. Le catalogue .npz ne les porte pas : elles ne
+    servent qu'au réseau, où elles sont la seule clé commune entre deux boutiques."""
+    fichier = Path("data/montures.csv")
+    if not fichier.is_file():
+        return {}
+    import csv
+    with open(fichier, newline="", encoding="utf-8") as f:
+        return {(l.get("monture") or "").strip(): (l.get("reference") or "").strip()
+                for l in csv.DictReader(f) if (l.get("reference") or "").strip()}
+
+
+@app.post("/reseau/inscription")
+def route_inscription(
+    nom: str = Query(..., min_length=2, max_length=120, description="Nom de la boutique"),
+    ville: str = Query("", max_length=80),
+    email: str = Query("", max_length=160, description="Contact, non diffusé aux confrères"),
+) -> dict:
+    """Inscrit une boutique et lui remet son jeton. Le jeton n'est affiché qu'ici : il vaut
+    mot de passe, et n'est pas récupérable ensuite (rien ne le stocke en clair côté client)."""
+    return RESEAU.inscrire(nom.strip(), ville.strip(), email.strip())
+
+
+@app.get("/reseau/boutiques")
+def route_boutiques() -> list[dict]:
+    """Annuaire : nom et ville uniquement. Ni jeton ni e-mail."""
+    return sorted(RESEAU.boutiques().values(), key=lambda b: b.get("nom", ""))
+
+
+@app.get("/reseau/mon-stock")
+def route_mon_stock(request: Request,
+                    x_boutique_jeton: str | None = Header(None)) -> dict:
+    """Ce que cette boutique *peut* proposer au réseau, et ce qu'elle propose déjà."""
+    boutique = _boutique(x_boutique_jeton)
+    partageables = _catalogue_partageable(request)
+    deja = {m.get("libelle") for m in RESEAU.partage(boutique)}
+    return {"boutique": boutique,
+            "montures": [{**m, "partagee": m["libelle"] in deja} for m in partageables]}
+
+
+@app.post("/reseau/partage")
+def route_partage(request: Request,
+                  montures: list[str] = Query([], description="Étiquettes locales à proposer"),
+                  x_boutique_jeton: str | None = Header(None)) -> dict:
+    """Déclare ce que la boutique propose au réseau. Remplace le partage précédent : envoyer
+    une liste vide retire tout. Le partage est un choix explicite, monture par monture -- le
+    reste du stock n'est jamais exposé."""
+    boutique = _boutique(x_boutique_jeton)
+    voulues = set(montures)
+    a_partager = [m for m in _catalogue_partageable(request) if m["libelle"] in voulues]
+
+    inconnues = voulues - {m["libelle"] for m in a_partager}
+    if inconnues:
+        raise HTTPException(status_code=400,
+                            detail=f"Montures absentes du stock ou sans marque : "
+                                   f"{', '.join(sorted(inconnues)[:5])}")
+
+    return {"boutique": boutique, "partagees": RESEAU.partager(boutique, a_partager)}
+
+
+@app.get("/reseau/chercher")
+def route_chercher(marque: str = Query("", description="Marque recherchée"),
+                   reference: str = Query("", description="Référence, si elle est connue"),
+                   x_boutique_jeton: str | None = Header(None)) -> list[dict]:
+    """Qui, dans le réseau, propose cette monture. Réservé aux boutiques inscrites : cet
+    annuaire dit qui détient quel stock, il n'a pas à être public."""
+    boutique = _boutique(x_boutique_jeton)
+    if not marque.strip() and not reference.strip():
+        raise HTTPException(status_code=400, detail="Préciser au moins une marque ou une référence")
+    return RESEAU.chercher(marque=marque, reference=reference, sauf_boutique=boutique)
+
+
+@app.post("/reseau/demande")
+def route_demande(boutique_sollicitee: str = Query(..., description="À qui s'adresser"),
+                  monture: str = Query("", description="ex. « OCTIKA OS866 »"),
+                  texte: str = Query(..., min_length=1, max_length=2000),
+                  x_boutique_jeton: str | None = Header(None)) -> dict:
+    """Ouvre la conversation et envoie le premier message, en une fois : c'est le geste réel de
+    l'opticien qui vient de trouver une monture chez un confrère."""
+    demandeuse = _boutique(x_boutique_jeton)
+    if boutique_sollicitee not in RESEAU.boutiques():
+        raise HTTPException(status_code=404, detail="Boutique inconnue")
+    try:
+        conversation = RESEAU.ouvrir_conversation(demandeuse, boutique_sollicitee, monture)
+        RESEAU.ecrire(conversation, demandeuse, texte)
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"conversation": conversation}
+
+
+@app.get("/reseau/conversations")
+def route_conversations(x_boutique_jeton: str | None = Header(None)) -> list[dict]:
+    return RESEAU.conversations(_boutique(x_boutique_jeton))
+
+
+@app.get("/reseau/conversation/{conversation}")
+def route_messages(conversation: str,
+                   x_boutique_jeton: str | None = Header(None)) -> dict:
+    boutique = _boutique(x_boutique_jeton)
+    try:
+        messages = RESEAU.messages(conversation, boutique)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Conversation inconnue")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    noms = RESEAU.boutiques()
+    return {"conversation": conversation, "moi": boutique,
+            "messages": [{**m, "nom": noms.get(m["auteur"], {}).get("nom", "?")}
+                         for m in messages]}
+
+
+@app.post("/reseau/conversation/{conversation}/message")
+def route_repondre(conversation: str,
+                   texte: str = Query(..., min_length=1, max_length=2000),
+                   x_boutique_jeton: str | None = Header(None)) -> dict:
+    boutique = _boutique(x_boutique_jeton)
+    try:
+        return RESEAU.ecrire(conversation, boutique, texte)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Conversation inconnue")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/reseau/bloquer")
+def route_bloquer(boutique_bloquee: str = Query(...),
+                  x_boutique_jeton: str | None = Header(None)) -> dict:
+    """Une boutique bloquée ne peut plus écrire et ne voit plus le stock partagé du bloqueur.
+    Réversible, et non réciproque."""
+    boutique = _boutique(x_boutique_jeton)
+    try:
+        RESEAU.bloquer(boutique, boutique_bloquee)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"bloquee": boutique_bloquee}
+
+
+@app.post("/reseau/signaler")
+def route_signaler(conversation: str = Query(...),
+                   motif: str = Query(..., min_length=1, max_length=500),
+                   x_boutique_jeton: str | None = Header(None)) -> dict:
+    """Consigne un signalement. Il est conservé, pas traité : la modération humaine reste à
+    organiser avant toute ouverture du réseau."""
+    boutique = _boutique(x_boutique_jeton)
+    try:
+        RESEAU.messages(conversation, boutique)   # participant ? sinon rien à signaler
+    except KeyError:
+        raise HTTPException(status_code=404, detail="Conversation inconnue")
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    RESEAU.signaler(conversation, boutique, motif)
+    return {"signale": conversation}

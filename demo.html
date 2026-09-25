@@ -101,6 +101,41 @@
 </section>
 
 <section>
+  <h2>Réseau entre opticiens</h2>
+  <p class="aide">Un client demande une monture que vous n'avez plus ? Cherchez-la chez un
+     confrère inscrit, et écrivez-lui directement.</p>
+
+  <div id="reseauInscription">
+    <p><input type="text" id="nomBoutique" placeholder="Nom de la boutique" size="22">
+       <input type="text" id="villeBoutique" placeholder="Ville" size="12">
+       <button onclick="inscrire()">S'inscrire au réseau</button></p>
+    <p class="aide">Démonstration : inscrivez deux boutiques pour voir les deux côtés de
+       l'échange. Vous pourrez basculer de l'une à l'autre.</p>
+  </div>
+
+  <div id="reseauConnecte" hidden>
+    <p><label>Vous êtes <select id="boutiqueActive" onchange="changerBoutique()"></select></label>
+       <button style="padding:4px 10px;font-size:.85rem" onclick="el('reseauInscription').hidden=false">
+         Inscrire une autre boutique</button></p>
+
+    <h3 style="font-size:.95rem;margin:16px 0 6px">Ce que je propose au réseau</h3>
+    <p class="aide">Cochez les montures que vous acceptez de céder ou de dépanner. Le reste de
+       votre stock n'est jamais visible. Seules les montures dont la marque est renseignée
+       peuvent être partagées — sans marque, personne ne peut les reconnaître.</p>
+    <div id="monStock"></div>
+
+    <h3 style="font-size:.95rem;margin:18px 0 6px">Chercher chez un confrère</h3>
+    <p><label>Marque <select id="marqueReseau"><option value="">—</option></select></label>
+       <label>Réf. <input type="text" id="refReseau" size="10" placeholder="si connue"></label>
+       <button onclick="chercherReseau()">Chercher</button></p>
+    <div id="sortieReseau"></div>
+
+    <h3 style="font-size:.95rem;margin:18px 0 6px">Mes échanges</h3>
+    <div id="sortieMessages"></div>
+  </div>
+</section>
+
+<section>
   <h2>Fiabilité constatée</h2>
   <p class="aide">Calculée sur les identifications que vous avez validées ci-dessus. C'est la
      seule mesure prise dans vos conditions réelles.</p>
@@ -123,6 +158,9 @@ async function connecter() {
     const select = el('marque');
     select.innerHTML = '<option value="">— toutes —</option>';
     marques.forEach(m => select.add(new Option(m, m)));
+    const reseau = el('marqueReseau');
+    reseau.innerHTML = '<option value="">—</option>';
+    marques.forEach(m => reseau.add(new Option(m, m)));
     el('nbMarques').textContent = marques.length + ' marques au catalogue';
     el('etatApi').textContent = 'connecté';
   } catch (e) {
@@ -177,11 +215,18 @@ function afficher(d) {
       <div class="score">${x.similarite.toFixed(3)}</div>
     </button>`).join('');
 
+  // La monture identifiée n'est pas forcément en rayon : le geste suivant de l'opticien est de
+  // la chercher chez un confrère. Le bouton évite qu'il ait à retaper la marque.
+  const versReseau = (boutiques.length && r[0].marque)
+    ? `<button style="padding:4px 10px;font-size:.85rem" onclick="chercherReseau('${r[0].marque}','')">
+         Chercher « ${r[0].marque} » dans le réseau</button>` : '';
+
   el('sortie').innerHTML = bandeau + filtre +
     `<div class="grille">${cartes}</div>
      <p class="aide">Cliquez la bonne monture : chaque validation mesure la fiabilité réelle et
         servira à améliorer le modèle.
-        <button style="padding:4px 10px;font-size:.85rem" onclick="valider(null,'')">Aucune ne correspond</button></p>
+        <button style="padding:4px 10px;font-size:.85rem" onclick="valider(null,'')">Aucune ne correspond</button>
+        ${versReseau}</p>
      <div id="confirmation"></div>`;
 }
 
@@ -316,7 +361,214 @@ async function bilan() {
   }
 }
 
+// ------------------------------------------------------- réseau entre opticiens (module 3)
+// Les jetons sont gardés dans ce navigateur pour permettre la bascule entre boutiques pendant
+// la démonstration. C'est commode à montrer et insuffisant en vrai : un jeton en localStorage
+// est lisible par tout script de la page. Voir l'avertissement en tête de reseau.py.
+let boutiques = JSON.parse(localStorage.getItem('opti_boutiques') || '[]');
+let conversationOuverte = null;
+
+const active = () => boutiques.find(b => b.boutique === el('boutiqueActive').value) || boutiques[0];
+const entete = () => ({ 'X-Boutique-Jeton': active().jeton });
+
+async function inscrire() {
+  const nom = el('nomBoutique').value.trim();
+  if (nom.length < 2) { alert('Indiquez le nom de la boutique.'); return; }
+  const params = new URLSearchParams({ nom, ville: el('villeBoutique').value.trim() });
+  try {
+    const r = await fetch(api() + '/reseau/inscription?' + params, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    boutiques.push(await r.json());
+    localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
+    el('nomBoutique').value = el('villeBoutique').value = '';
+    el('reseauInscription').hidden = true;
+    majBoutiques(boutiques[boutiques.length - 1].boutique);
+  } catch (e) {
+    alert('Inscription impossible : ' + e.message);
+  }
+}
+
+function majBoutiques(choisie) {
+  const select = el('boutiqueActive');
+  select.innerHTML = '';
+  boutiques.forEach(b => select.add(new Option(b.nom + (b.ville ? ' — ' + b.ville : ''), b.boutique)));
+  if (choisie) select.value = choisie;
+  el('reseauConnecte').hidden = boutiques.length === 0;
+  el('reseauInscription').hidden = boutiques.length > 0;
+  if (boutiques.length) changerBoutique();
+}
+
+async function changerBoutique() {
+  conversationOuverte = null;
+  el('sortieReseau').innerHTML = '';
+  await Promise.all([monStock(), mesEchanges()]);
+}
+
+/** Un jeton peut ne plus rien valoir côté serveur -- journal recréé, volume non monté. Sans
+ *  ce filet, toutes les requêtes répondraient 401 et l'interface resterait muette. */
+function jetonPerime() {
+  const perdue = active();
+  boutiques = boutiques.filter(b => b.boutique !== perdue.boutique);
+  localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
+  majBoutiques();
+  alert(`La boutique « ${perdue.nom} » n'est plus reconnue par le serveur (données ` +
+        `réinitialisées). Inscrivez-la à nouveau.`);
+}
+
+async function monStock() {
+  try {
+    const r = await fetch(api() + '/reseau/mon-stock', { headers: entete() });
+    if (r.status === 401) { jetonPerime(); return; }
+    const d = await r.json();
+    if (!d.montures || !d.montures.length) {
+      el('monStock').innerHTML = `<p class="aide">Aucune monture partageable : renseignez d'abord
+        les marques dans <code>data/montures.csv</code>.</p>`;
+      return;
+    }
+    el('monStock').innerHTML = `
+      <div style="max-height:170px;overflow:auto;border:1px solid var(--trait);border-radius:7px;padding:8px">
+        ${d.montures.map(m => `<label style="display:block;color:var(--encre)">
+            <input type="checkbox" class="aPartager" value="${m.libelle}" ${m.partagee ? 'checked' : ''}>
+            ${m.marque}${m.reference ? ' ' + m.reference : ''}
+            <span class="aide">(${m.libelle})</span></label>`).join('')}
+      </div>
+      <p><button style="padding:5px 12px;font-size:.87rem" onclick="enregistrerPartage()">Enregistrer</button>
+         <span id="etatPartage" class="aide"></span></p>`;
+  } catch (e) {
+    el('monStock').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+async function enregistrerPartage() {
+  const params = new URLSearchParams();
+  document.querySelectorAll('.aPartager:checked').forEach(c => params.append('montures', c.value));
+  try {
+    const r = await fetch(api() + '/reseau/partage?' + params, { method: 'POST', headers: entete() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    el('etatPartage').textContent = (await r.json()).partagees + ' monture(s) proposée(s) au réseau';
+  } catch (e) {
+    el('etatPartage').innerHTML = '<span class="erreur">Échec : ' + e.message + '</span>';
+  }
+}
+
+async function chercherReseau(marque, reference) {
+  if (marque !== undefined) { el('marqueReseau').value = marque; el('refReseau').value = reference || ''; }
+  const params = new URLSearchParams({ marque: el('marqueReseau').value,
+                                        reference: el('refReseau').value.trim() });
+  if (!el('marqueReseau').value && !el('refReseau').value.trim()) {
+    el('sortieReseau').innerHTML = '<p class="erreur">Choisissez au moins une marque.</p>'; return;
+  }
+  try {
+    const r = await fetch(api() + '/reseau/chercher?' + params, { headers: entete() });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const trouves = await r.json();
+    el('sortieReseau').innerHTML = trouves.length
+      ? trouves.map(t => `
+          <div class="bandeau fiable">
+            <strong>${t.marque}${t.reference ? ' ' + t.reference : ''}</strong>
+            disponible chez <strong>${t.nom}</strong>${t.ville ? ' — ' + t.ville : ''}
+            <button style="padding:4px 10px;font-size:.85rem;margin-left:8px"
+              onclick="ecrireA('${t.boutique}','${t.nom.replace(/'/g, "\\'")}',
+                               '${(t.marque + ' ' + (t.reference || '')).trim()}')">Écrire</button>
+          </div>`).join('')
+      : `<p class="aide">Personne ne propose cette monture pour l'instant. Le réseau ne montre
+         que ce que les confrères ont explicitement accepté de partager.</p>`;
+  } catch (e) {
+    el('sortieReseau').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+function ecrireA(boutique, nom, monture) {
+  el('sortieReseau').innerHTML = `
+    <div class="bandeau doute">
+      <p style="margin:0 0 8px">À <strong>${nom}</strong> — au sujet de <strong>${monture}</strong></p>
+      <textarea id="texteDemande" rows="3" style="width:100%;padding:6px;border-radius:6px;
+        border:1px solid var(--trait);background:var(--champ);color:var(--encre);font-family:inherit"
+        >Bonjour, un client cherche cette monture. Est-elle encore disponible ?</textarea>
+      <p style="margin:8px 0 0"><button style="padding:5px 12px;font-size:.87rem"
+         onclick="envoyerDemande('${boutique}','${monture.replace(/'/g, "\\'")}')">Envoyer</button></p>
+    </div>`;
+}
+
+async function envoyerDemande(boutique, monture) {
+  const params = new URLSearchParams({ boutique_sollicitee: boutique, monture,
+                                        texte: el('texteDemande').value });
+  try {
+    const r = await fetch(api() + '/reseau/demande?' + params, { method: 'POST', headers: entete() });
+    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
+    conversationOuverte = (await r.json()).conversation;
+    el('sortieReseau').innerHTML = '<p class="aide">Message envoyé. La suite se passe dans « Mes échanges ».</p>';
+    await mesEchanges();
+    await ouvrirConversation(conversationOuverte);
+  } catch (e) {
+    el('sortieReseau').innerHTML = '<p class="erreur">Envoi impossible : ' + e.message + '</p>';
+  }
+}
+
+async function mesEchanges() {
+  try {
+    const reponse = await fetch(api() + '/reseau/conversations', { headers: entete() });
+    if (reponse.status === 401) { jetonPerime(); return; }
+    const fils = await reponse.json();
+    el('sortieMessages').innerHTML = fils.length
+      ? fils.map(f => `<p class="aide" style="margin:4px 0">
+          <button style="padding:4px 10px;font-size:.85rem"
+            onclick="ouvrirConversation('${f.conversation}')">${f.interlocuteur}</button>
+          ${f.monture ? '<strong>' + f.monture + '</strong> — ' : ''}${f.dernier || 'pas encore de message'}
+          </p>`).join('') + '<div id="filOuvert"></div>'
+      : '<p class="aide">Aucun échange pour l\'instant.</p><div id="filOuvert"></div>';
+    if (conversationOuverte) await ouvrirConversation(conversationOuverte);
+  } catch (e) {
+    el('sortieMessages').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+async function ouvrirConversation(conversation) {
+  conversationOuverte = conversation;
+  try {
+    const d = await fetch(api() + '/reseau/conversation/' + conversation,
+                          { headers: entete() }).then(r => r.json());
+    el('filOuvert').innerHTML = `
+      <div style="border:1px solid var(--trait);border-radius:8px;padding:10px;margin-top:8px">
+        ${d.messages.map(m => `<p style="margin:3px 0;font-size:.9rem">
+            <strong style="color:${m.auteur === d.moi ? 'var(--vert)' : 'var(--gris)'}">${m.nom}</strong> :
+            ${m.texte}</p>`).join('') || '<p class="aide">Fil vide.</p>'}
+        <p style="margin:10px 0 0">
+          <input type="text" id="reponse" placeholder="Votre réponse" style="width:70%"
+                 onkeydown="if(event.key==='Enter')repondre()">
+          <button style="padding:5px 12px;font-size:.87rem" onclick="repondre()">Répondre</button></p>
+        <p class="aide" style="margin:6px 0 0">
+          <button style="padding:3px 8px;font-size:.8rem" onclick="signaler()">Signaler</button></p>
+      </div>`;
+  } catch (e) {
+    el('filOuvert').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+async function repondre() {
+  const texte = el('reponse').value.trim();
+  if (!texte) return;
+  const url = api() + '/reseau/conversation/' + conversationOuverte + '/message?texte=' +
+              encodeURIComponent(texte);
+  try {
+    const r = await fetch(url, { method: 'POST', headers: entete() });
+    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
+    await mesEchanges();
+  } catch (e) {
+    alert('Envoi impossible : ' + e.message);
+  }
+}
+
+async function signaler() {
+  const motif = prompt('Motif du signalement ?');
+  if (!motif) return;
+  await fetch(api() + '/reseau/signaler?conversation=' + conversationOuverte +
+              '&motif=' + encodeURIComponent(motif), { method: 'POST', headers: entete() });
+  alert('Signalement enregistré.');
+}
+
 connecter();
+majBoutiques();
 </script>
 </body>
 </html>

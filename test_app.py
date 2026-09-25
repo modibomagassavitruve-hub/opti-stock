@@ -315,3 +315,172 @@ def test_route_identifier_fichier_non_image_rejete(client):
 def test_route_identifier_sans_fichier_rejete(client):
     r = client.post("/identifier")
     assert r.status_code == 422  # champ 'photo' obligatoire
+
+
+# ------------------------------------------------- routes réseau (module 3)
+@pytest.fixture()
+def reseau_vide(client, tmp_path, monkeypatch):
+    """Réseau isolé par test. Sans cette redirection, les tests écriraient dans le vrai journal
+    de la boutique : des inscriptions et des messages factices dans les données de production."""
+    from reseau import Reseau
+
+    monkeypatch.setattr(app_module, "RESEAU", Reseau(tmp_path / "reseau.jsonl"))
+    monkeypatch.setattr(app_module, "_references_catalogue",
+                        lambda: {"m1": "OS866", "m2": "6135"})
+    client.app.state.modeles = _modeles_avec_marques()
+    return client
+
+
+@pytest.fixture()
+def reseau(reseau_vide):
+    """Le réseau isolé, avec deux boutiques déjà inscrites."""
+    client = reseau_vide
+    a = client.post("/reseau/inscription?nom=Optique Centre&ville=Lyon").json()
+    b = client.post("/reseau/inscription?nom=Vision Plus&ville=Villeurbanne").json()
+    return client, {"X-Boutique-Jeton": a["jeton"]}, {"X-Boutique-Jeton": b["jeton"]}, a, b
+
+
+def test_inscription_renvoie_un_jeton(reseau_vide):
+    r = reseau_vide.post("/reseau/inscription?nom=Optique Centre&ville=Lyon")
+    assert r.status_code == 200
+    assert r.json()["jeton"] and r.json()["boutique"]
+
+
+def test_inscription_refuse_un_nom_vide(reseau_vide):
+    assert reseau_vide.post("/reseau/inscription?nom=A").status_code == 422
+
+
+def test_annuaire_n_expose_pas_les_jetons(reseau):
+    client, *_ = reseau
+    fiches = client.get("/reseau/boutiques").json()
+    assert [f["nom"] for f in fiches] == ["Optique Centre", "Vision Plus"]
+    assert all("jeton" not in f and "email" not in f for f in fiches)
+
+
+def test_routes_reseau_exigent_un_jeton(reseau):
+    """Sans jeton valide, aucune route du réseau ne répond."""
+    client, entete_a, *_ = reseau
+    protegees = [("get", "/reseau/mon-stock"), ("get", "/reseau/chercher?marque=Osmose"),
+                 ("get", "/reseau/conversations"), ("post", "/reseau/partage"),
+                 ("post", "/reseau/demande?boutique_sollicitee=x&texte=bonjour")]
+    for methode, url in protegees:
+        assert getattr(client, methode)(url).status_code == 401, url
+        assert getattr(client, methode)(
+            url, headers={"X-Boutique-Jeton": "faux"}).status_code == 401, url
+
+
+def test_mon_stock_ne_propose_que_les_montures_a_marque(reseau):
+    client, entete_a, *_ = reseau
+    montures = client.get("/reseau/mon-stock", headers=entete_a).json()["montures"]
+    assert {m["libelle"] for m in montures} == {"m1", "m2", "m3"}
+    assert all(m["marque"] for m in montures)
+    assert not any(m["partagee"] for m in montures)
+
+
+def test_partage_puis_recherche_par_un_confrere(reseau):
+    """Le parcours de la démonstration, en HTTP."""
+    client, entete_a, entete_b, _, b = reseau
+    assert client.post("/reseau/partage?montures=m1", headers=entete_b).json()["partagees"] == 1
+
+    trouves = client.get("/reseau/chercher?marque=Osmose&reference=OS866",
+                          headers=entete_a).json()
+    assert len(trouves) == 1
+    assert trouves[0]["nom"] == "Vision Plus"
+    assert trouves[0]["boutique"] == b["boutique"]
+
+
+def test_partage_refuse_une_monture_absente_du_stock(reseau):
+    client, entete_a, *_ = reseau
+    r = client.post("/reseau/partage?montures=inexistante", headers=entete_a)
+    assert r.status_code == 400
+
+
+def test_partage_vide_retire_tout(reseau):
+    client, entete_a, entete_b, *_ = reseau
+    client.post("/reseau/partage?montures=m1", headers=entete_b)
+    client.post("/reseau/partage", headers=entete_b)
+    assert client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json() == []
+
+
+def test_recherche_sans_critere_rejetee(reseau):
+    client, entete_a, *_ = reseau
+    assert client.get("/reseau/chercher", headers=entete_a).status_code == 400
+
+
+def test_demande_puis_reponse_de_bout_en_bout(reseau):
+    client, entete_a, entete_b, _, b = reseau
+    client.post("/reseau/partage?montures=m1", headers=entete_b)
+
+    conv = client.post(f"/reseau/demande?boutique_sollicitee={b['boutique']}"
+                        "&monture=Osmose OS866&texte=Encore disponible ?",
+                        headers=entete_a).json()["conversation"]
+
+    # B voit la demande arriver sans avoir eu besoin d'un identifiant transmis hors du produit
+    fils = client.get("/reseau/conversations", headers=entete_b).json()
+    assert fils[0]["interlocuteur"] == "Optique Centre"
+    assert fils[0]["monture"] == "Osmose OS866"
+
+    client.post(f"/reseau/conversation/{conv}/message?texte=Oui, je la mets de côté",
+                headers=entete_b)
+    fil = client.get(f"/reseau/conversation/{conv}", headers=entete_a).json()
+    assert [m["nom"] for m in fil["messages"]] == ["Optique Centre", "Vision Plus"]
+
+
+def test_une_boutique_tierce_ne_lit_pas_la_conversation(reseau):
+    """L'étanchéité, vérifiée au niveau HTTP et pas seulement dans le module."""
+    client, entete_a, entete_b, _, b = reseau
+    conv = client.post(f"/reseau/demande?boutique_sollicitee={b['boutique']}"
+                        "&texte=Prix confidentiel 40 EUR", headers=entete_a).json()["conversation"]
+
+    c = client.post("/reseau/inscription?nom=Tiers Curieux&ville=Paris").json()
+    entete_c = {"X-Boutique-Jeton": c["jeton"]}
+    assert client.get(f"/reseau/conversation/{conv}", headers=entete_c).status_code == 403
+    assert client.post(f"/reseau/conversation/{conv}/message?texte=coucou",
+                        headers=entete_c).status_code == 403
+    assert client.get("/reseau/conversations", headers=entete_c).json() == []
+
+
+def test_demande_a_une_boutique_inconnue(reseau):
+    client, entete_a, *_ = reseau
+    r = client.post("/reseau/demande?boutique_sollicitee=00000000&texte=bonjour",
+                     headers=entete_a)
+    assert r.status_code == 404
+
+
+def test_conversation_inconnue_donne_404(reseau):
+    client, entete_a, *_ = reseau
+    assert client.get("/reseau/conversation/inexistante", headers=entete_a).status_code == 404
+
+
+def test_blocage_coupe_le_contact_et_masque_le_stock(reseau):
+    client, entete_a, entete_b, a, b = reseau
+    client.post("/reseau/partage?montures=m1", headers=entete_b)
+    client.post(f"/reseau/bloquer?boutique_bloquee={a['boutique']}", headers=entete_b)
+
+    assert client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json() == []
+    r = client.post(f"/reseau/demande?boutique_sollicitee={b['boutique']}&texte=bonjour",
+                     headers=entete_a)
+    assert r.status_code == 403
+
+
+def test_signalement_reserve_aux_participants(reseau):
+    client, entete_a, entete_b, _, b = reseau
+    conv = client.post(f"/reseau/demande?boutique_sollicitee={b['boutique']}&texte=bonjour",
+                        headers=entete_a).json()["conversation"]
+
+    c = client.post("/reseau/inscription?nom=Tiers&ville=Paris").json()
+    assert client.post(f"/reseau/signaler?conversation={conv}&motif=spam",
+                        headers={"X-Boutique-Jeton": c["jeton"]}).status_code == 403
+    assert client.post(f"/reseau/signaler?conversation={conv}&motif=spam",
+                        headers=entete_b).status_code == 200
+
+
+def test_mon_stock_liste_une_monture_par_entree_pas_une_par_photo(reseau):
+    """Le catalogue compte plusieurs photos par monture : les lister toutes rendrait le choix
+    des montures à partager illisible (constaté : chaque monture affichée cinq fois)."""
+    client, entete_a, *_ = reseau
+    client.app.state.modeles.labels_catalogue = np.array(["m1", "m1", "m1", "m2"])
+    client.app.state.modeles.marques_catalogue = np.array(["Osmose"] * 3 + ["Maritza"])
+
+    montures = client.get("/reseau/mon-stock", headers=entete_a).json()["montures"]
+    assert [m["libelle"] for m in montures] == ["m2", "m1"]  # triées par marque
