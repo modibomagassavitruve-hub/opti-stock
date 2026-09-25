@@ -36,6 +36,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from PIL import Image, ImageOps
 
+from inventaire import Inventaire
 from journal import Journal, chronometre
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, charger_backbone
@@ -268,7 +269,9 @@ CHARGEUR_MODELES: Callable[[], Modeles] = charger_modeles
 # fiabilité prise en conditions réelles, et il se construit sur des semaines d'usage. En
 # conteneur, l'écrire dans l'image le ferait disparaître à chaque redéploiement -- d'où le
 # chemin configurable, à faire pointer vers un volume monté.
-JOURNAL = Journal(Path(os.environ.get("OPTI_STOCK_JOURNAL", "data/journal")))
+_DONNEES = Path(os.environ.get("OPTI_STOCK_JOURNAL", "data/journal"))
+JOURNAL = Journal(_DONNEES)
+INVENTAIRES = Inventaire(_DONNEES / "inventaires")
 
 
 @asynccontextmanager
@@ -380,6 +383,56 @@ def route_photo_monture(request: Request, label: str) -> FileResponse:
             return FileResponse(_photo_la_plus_lisible(sources), media_type="image/jpeg")
 
     raise HTTPException(status_code=404, detail=f"Aucune image pour la monture {label}")
+
+
+@app.post("/inventaire")
+def route_inventaire_demarrer(request: Request, libelle: str = Query("", description="ex. 2026")) -> dict:
+    """Ouvre une session en figeant la liste des montures attendues, pour que le catalogue
+    puisse évoluer pendant l'inventaire sans fausser le décompte."""
+    montures = sorted({str(l) for l in _modeles(request).labels_catalogue})
+    session = INVENTAIRES.demarrer(montures, libelle)
+    return INVENTAIRES.etat(session)
+
+
+@app.get("/inventaire")
+def route_inventaires() -> list[dict]:
+    return INVENTAIRES.sessions()
+
+
+@app.get("/inventaire/{session}")
+def route_inventaire_etat(session: str) -> dict:
+    try:
+        return INVENTAIRES.etat(session)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
+
+
+@app.post("/inventaire/{session}/compter")
+def route_inventaire_compter(session: str, monture: str = Query(..., description="Monture pointée")) -> dict:
+    """Pointe une monture comme présente en rayon. L'identification par photo passe par
+    /identifier ; ici l'opticien confirme, c'est lui qui fait foi."""
+    try:
+        return INVENTAIRES.compter(session, monture)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/inventaire/{session}/annuler")
+def route_inventaire_annuler(session: str, monture: str = Query(...)) -> dict:
+    try:
+        return INVENTAIRES.annuler_comptage(session, monture)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
+
+
+@app.post("/inventaire/{session}/cloturer")
+def route_inventaire_cloturer(session: str) -> dict:
+    try:
+        return INVENTAIRES.cloturer(session)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
 
 
 @app.get("/journal/bilan")

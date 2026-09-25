@@ -255,6 +255,30 @@ def test_photo_monture_refuse_une_etiquette_inconnue(client, tmp_path):
     assert client.get("/monture/..%2F..%2Fetc%2Fpasswd/photo").status_code == 404
 
 
+def test_inventaire_bout_en_bout(client, tmp_path, monkeypatch):
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path))
+
+    session = client.post("/inventaire?libelle=2026").json()
+    assert session["attendues"] == 3          # les 3 montures du catalogue factice
+    sid = session["session"]
+
+    etat = client.post(f"/inventaire/{sid}/compter?monture=talla/bogart2").json()
+    assert etat["trouvees"] == 1
+    assert len(etat["manquantes"]) == 2
+
+    assert client.post(f"/inventaire/{sid}/cloturer").json()["statut"] == "clos"
+    # un inventaire clos n'accepte plus de comptage : le décompte final ne doit plus bouger
+    assert client.post(f"/inventaire/{sid}/compter?monture=talla/bogart2").status_code == 409
+
+
+def test_inventaire_inconnu_renvoie_404(client, tmp_path, monkeypatch):
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path))
+    assert client.get("/inventaire/zzz").status_code == 404
+    assert client.post("/inventaire/zzz/compter?monture=a").status_code == 404
+
+
 def test_route_sante(client):
     assert client.get("/sante").json() == {"statut": "ok"}
 

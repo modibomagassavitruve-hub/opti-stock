@@ -89,6 +89,18 @@
 </section>
 
 <section>
+  <h2>Inventaire</h2>
+  <p class="aide">Parcourez les rayons et pointez chaque monture. Ce qui compte à la fin, ce
+     n'est pas la liste de ce que vous avez trouvé, mais celle de ce qui manque.</p>
+  <div id="inventaireBarre">
+    <input type="text" id="libelleInv" placeholder="ex. 2026" size="10">
+    <button onclick="demarrerInventaire()">Démarrer un inventaire</button>
+    <button onclick="listerInventaires()">Reprendre</button>
+  </div>
+  <div id="sortieInventaire"></div>
+</section>
+
+<section>
   <h2>Fiabilité constatée</h2>
   <p class="aide">Calculée sur les identifications que vous avez validées ci-dessus. C'est la
      seule mesure prise dans vos conditions réelles.</p>
@@ -182,8 +194,17 @@ async function valider(carte, monture) {
     if (!r.ok) throw new Error('HTTP ' + r.status);
     document.querySelectorAll('.carte').forEach(c => c.classList.remove('choisie'));
     if (carte) carte.classList.add('choisie');
+
+    // Un inventaire ouvert : la validation sert aussi de pointage. L'opticien fait un seul
+    // geste — photographier, confirmer — au lieu de valider puis pointer séparément.
+    let pointee = '';
+    if (inventaireEnCours && monture) {
+      const r = await fetch(api() + '/inventaire/' + inventaireEnCours +
+                            '/compter?monture=' + encodeURIComponent(monture), { method: 'POST' });
+      if (r.ok) { pointee = ' et pointé dans l\'inventaire'; await rafraichirInventaire(); }
+    }
     el('confirmation').innerHTML = '<p class="aide">' +
-      (monture ? 'Enregistré : ' + monture : 'Enregistré : aucune correspondance') + '.</p>';
+      (monture ? 'Enregistré : ' + monture + pointee : 'Enregistré : aucune correspondance') + '.</p>';
   } catch (e) {
     el('confirmation').innerHTML = '<p class="erreur">Enregistrement impossible : ' + e.message + '</p>';
   }
@@ -210,6 +231,68 @@ async function lireEtiquette() {
   } catch (e) {
     el('sortieEtiquette').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
   }
+}
+
+// ------------------------------------------------------------------ inventaire
+let inventaireEnCours = null;
+
+async function demarrerInventaire() {
+  const libelle = encodeURIComponent(el('libelleInv').value || '');
+  try {
+    const r = await fetch(api() + '/inventaire?libelle=' + libelle, { method: 'POST' });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    inventaireEnCours = (await r.json()).session;
+    await rafraichirInventaire();
+  } catch (e) {
+    el('sortieInventaire').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+async function listerInventaires() {
+  const sessions = await fetch(api() + '/inventaire').then(r => r.json());
+  if (!sessions.length) {
+    el('sortieInventaire').innerHTML = '<p class="aide">Aucun inventaire pour l\'instant.</p>';
+    return;
+  }
+  el('sortieInventaire').innerHTML = sessions.map(s => `
+    <p class="aide"><button style="padding:4px 10px;font-size:.85rem"
+       onclick="ouvrirInventaire('${s.session}')">${s.libelle || s.session}</button>
+       ${s.trouvees}/${s.attendues} pointées — ${s.statut}</p>`).join('');
+}
+
+async function ouvrirInventaire(session) {
+  inventaireEnCours = session;
+  await rafraichirInventaire();
+}
+
+async function rafraichirInventaire() {
+  if (!inventaireEnCours) return;
+  const e = await fetch(api() + '/inventaire/' + inventaireEnCours).then(r => r.json());
+  const reste = e.attendues - e.trouvees;
+  const anomalies = [];
+  if (e.hors_catalogue.length)
+    anomalies.push(`${e.hors_catalogue.length} monture(s) en rayon mais absente(s) du catalogue : ${e.hors_catalogue.join(', ')}`);
+  if (e.comptees_plusieurs_fois.length)
+    anomalies.push(`${e.comptees_plusieurs_fois.length} pointée(s) plusieurs fois : ${e.comptees_plusieurs_fois.join(', ')}`);
+
+  el('sortieInventaire').innerHTML = `
+    <div class="bandeau ${reste === 0 ? 'fiable' : 'doute'}">
+      <strong>${e.libelle || e.session}</strong> — ${e.trouvees} / ${e.attendues} pointées,
+      ${reste} restante(s). ${e.statut === 'clos' ? 'Inventaire clos.' : ''}
+    </div>
+    ${anomalies.map(a => `<p class="aide">⚠ ${a}</p>`).join('')}
+    <p class="aide">Identifiez une monture ci-dessus, puis validez-la : elle sera pointée
+       automatiquement dans cet inventaire.</p>
+    ${e.manquantes.length ? `<details><summary class="aide" style="cursor:pointer">
+       Voir les ${e.manquantes.length} montures non trouvées</summary>
+       <p class="aide">${e.manquantes.join(', ')}</p></details>` : ''}
+    ${e.statut === 'en_cours' ? `<button style="margin-top:10px"
+       onclick="cloturerInventaire()">Clôturer</button>` : ''}`;
+}
+
+async function cloturerInventaire() {
+  await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
+  await rafraichirInventaire();
 }
 
 async function bilan() {
