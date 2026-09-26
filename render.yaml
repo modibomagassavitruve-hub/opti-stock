@@ -1,5 +1,12 @@
 # Déploiement Render. À connecter à un dépôt GitHub depuis le tableau de bord Render.
 #
+# LE MODÈLE N'EST PAS DANS CE DÉPÔT. data/ n'est pas versionné : il contient l'inventaire
+# réel d'une boutique et les photos de ses montures. Une instance déployée depuis ce dépôt
+# servira donc la saisie, l'OCR d'étiquette, le stock, l'inventaire et le réseau -- tout sauf
+# l'identification par similarité, qui a besoin de data/catalogue.npz et data/tete.pt.
+# Pour l'activer : construire le catalogue depuis ses propres photos (voir le README) et
+# déployer depuis un dépôt privé qui les inclut.
+#
 # CHOIX DU FORFAIT -- la seule décision qui compte ici.
 # Mesuré sur cette application : 440 Mo de pic sous 12 requêtes simultanées, sur macOS qui
 # compresse la mémoire. Sous Linux, compter davantage. Le forfait gratuit et le Starter

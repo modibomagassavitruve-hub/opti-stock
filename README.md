@@ -1,6 +1,12 @@
 # Opti-Stock
 
-Identifier une monture d'optique à partir d'une photo, et pointer le stock en inventaire.
+Gestion de stock pour opticiens : entrer une monture depuis son téléphone, la retrouver par
+photo, inventorier le rayon, et dépanner un confrère du réseau.
+
+> **`data/` n'est pas dans ce dépôt.** Il contient l'inventaire réel d'une boutique, les
+> photos de ses montures et le modèle entraîné dessus — des données d'entreprise, pas du code.
+> Tout se reconstruit à partir de vos propres photos : voir *Ajouter des montures*. Sans
+> catalogue, l'application fonctionne déjà entièrement sauf l'identification par similarité.
 
 ```bash
 ./demarrer_demo.sh              # salon : adresse publique + QR code à scanner
