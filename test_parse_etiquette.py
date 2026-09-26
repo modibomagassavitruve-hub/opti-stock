@@ -45,3 +45,22 @@ def test_taille_sans_separateur_et_coloris_lettre_chiffre():
 def test_texte_inexploitable():
     e = parse_etiquette("hello world", MARQUES)
     assert champs(e) == ("", "", "", "", "", "")
+
+
+def test_deux_tokens_a_trois_chiffres_ne_font_pas_une_reference():
+    """Lu sur une vraie étiquette au salon : « OZ EYEV 134 » donnait la référence « EYEV134 »,
+    alors que 134 est une longueur de branche ou un prix. Un champ vide se corrige d'un coup
+    d'œil ; une valeur fausse se recopie sans la voir."""
+    e = parse_etiquette("7706 9 @Z EYEW Pce MURAT C2 OZ EYEV 134", ["OZ EYEWEAR"])
+    assert e.reference != "EYEV134"
+
+
+def test_reference_en_deux_morceaux_toujours_reconnue():
+    """La correction ne doit pas casser le cas qu'elle sert : « RB 3025 »."""
+    assert parse_etiquette("RAY-BAN RB 3025 58-14 135", ["RAY-BAN"]).reference == "RB3025"
+
+
+def test_taille_francaise_collee_lue():
+    """« 54017-140 » : calibre 54, pont 17, branche 140 -- le carré est lu comme un zéro."""
+    e = parse_etiquette("C2 MURAT 54017-140", [])
+    assert (e.calibre, e.pont, e.branche) == ("54", "17", "140")

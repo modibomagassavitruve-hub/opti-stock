@@ -305,6 +305,34 @@ const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
 
 let stockCache = [];
 
+/** Réduit une photo avant l'envoi. Un téléphone produit 3 à 12 Mo par cliché ; sur le wifi
+ *  d'un salon l'envoi prendrait des dizaines de secondes, et c'est exactement là que la
+ *  démonstration s'effondre. Le modèle travaille de toute façon en 224 px, et l'OCR n'a pas
+ *  besoin de plus que ce qui est demandé ici.
+ *
+ *  `createImageBitmap` applique l'orientation EXIF, sinon les photos de téléphone arrivent
+ *  couchées -- le même piège que côté serveur. En cas d'échec on envoie l'original : mieux
+ *  vaut un envoi lent qu'une saisie perdue. */
+async function compresser(fichier, coteMax = 1600, qualite = 0.85) {
+  try {
+    const bitmap = await createImageBitmap(fichier, { imageOrientation: 'from-image' });
+    const facteur = Math.min(1, coteMax / Math.max(bitmap.width, bitmap.height));
+    if (facteur === 1 && fichier.size < 900_000) return fichier;
+
+    const toile = document.createElement('canvas');
+    toile.width = Math.round(bitmap.width * facteur);
+    toile.height = Math.round(bitmap.height * facteur);
+    toile.getContext('2d').drawImage(bitmap, 0, 0, toile.width, toile.height);
+    bitmap.close();
+
+    const blob = await new Promise(r => toile.toBlob(r, 'image/jpeg', qualite));
+    if (!blob || blob.size >= fichier.size) return fichier;
+    return new File([blob], 'photo.jpg', { type: 'image/jpeg' });
+  } catch {
+    return fichier;
+  }
+}
+
 function onglet(nom) {
   document.querySelectorAll('.page').forEach(p => p.hidden = p.id !== 'page-' + nom);
   document.querySelectorAll('nav button').forEach(b =>
@@ -354,7 +382,8 @@ async function lireEtiquette() {
   el('sortieEtiquette').innerHTML = '<p class="chargement">Lecture de l\'étiquette…</p>';
   try {
     const form = new FormData();
-    form.append('photo', f);
+    // Plus de résolution que pour le reste : l'OCR lit une gravure de quelques millimètres.
+    form.append('photo', await compresser(f, 2200, 0.9));
     const d = await fetch(api() + '/lire-etiquette', { method: 'POST', body: form })
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 
@@ -379,13 +408,13 @@ async function enregistrerMonture() {
     coloris: el('fColoris').value.trim(), calibre: el('fCalibre').value.trim(),
     quantite: el('fQuantite').value || '1', emplacement: el('fEmplacement').value.trim(),
   });
-  const form = new FormData();
-  const photo = el('photoMonture').files[0];
-  if (photo) form.append('photo', photo);
-
   const bouton = el('btnSaisir');
   bouton.disabled = true;
   bouton.textContent = 'Enregistrement…';
+
+  const form = new FormData();
+  const photo = el('photoMonture').files[0];
+  if (photo) form.append('photo', await compresser(photo));
   try {
     const d = await fetch(api() + '/monture?' + params, { method: 'POST', body: form })
       .then(async r => { if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
@@ -423,7 +452,7 @@ async function identifier() {
   el('sortieIdent').innerHTML = '<p class="chargement">Analyse…</p>';
   try {
     const form = new FormData();
-    form.append('photo', f);
+    form.append('photo', await compresser(f));
     derniereReponse = await fetch(api() + '/identifier?k=6', { method: 'POST', body: form })
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 

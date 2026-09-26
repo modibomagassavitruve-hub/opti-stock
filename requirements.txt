@@ -8,6 +8,8 @@ numpy
 pandas
 scipy
 easyocr
+# segno : QR code de demarrer_demo.sh, pour faire scanner l'adresse sur un stand.
+segno
 # glasses-detector : seulement pour construire_catalogue.py --recadrage, option
 # mesurée comme dégradante et conservée pour comparaison. Pas requis pour servir.
 glasses-detector

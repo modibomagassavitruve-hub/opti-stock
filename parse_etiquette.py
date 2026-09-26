@@ -66,9 +66,13 @@ def _detecter_reference(tokens: list[str]) -> tuple[str, list[str]]:
     for i, t in enumerate(tokens):
         if RE_REFERENCE.match(t):
             return t, tokens[:i] + tokens[i + 1:]
-    # Référence écrite en deux morceaux : "RB 3025"
+    # Référence écrite en deux morceaux : "RB 3025". Quatre chiffres minimum ici, là où la
+    # forme en un seul mot en accepte trois : rapprocher deux tokens voisins est une
+    # supposition, et à trois chiffres elle attrape les longueurs de branche et les prix qui
+    # traînent sur l'étiquette -- « OZ EYEV 134 » produisait la référence « EYEV134 ».
+    # Un champ vide se corrige d'un coup d'œil ; une valeur fausse se recopie sans la voir.
     for i, (a, b) in enumerate(zip(tokens, tokens[1:])):
-        if re.fullmatch(r"[A-Za-z]{1,4}", a) and re.fullmatch(r"\d{3,5}[A-Za-z]{0,3}", b):
+        if re.fullmatch(r"[A-Za-z]{1,4}", a) and re.fullmatch(r"\d{4,5}[A-Za-z]{0,3}", b):
             return a + b, tokens[:i] + tokens[i + 2:]
     for i, t in enumerate(tokens):
         if RE_REFERENCE_NUM.match(t):
