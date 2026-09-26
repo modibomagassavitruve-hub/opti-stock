@@ -423,26 +423,40 @@ def route_inventaire_demarrer(request: Request, libelle: str = Query("", descrip
 
 
 @app.get("/inventaire")
-def route_inventaires() -> list[dict]:
-    return INVENTAIRES.sessions()
+def route_inventaires(request: Request) -> list[dict]:
+    identites = _identite(request)
+    return [_nommer_ecarts(e, identites) for e in INVENTAIRES.sessions()]
+
+
+def _nommer_ecarts(etat: dict, identites: dict[str, dict]) -> dict:
+    """Remplace les identifiants techniques par les libellés dans les listes d'écarts. Une
+    ligne « f_a1b2c3 manque » n'aide personne devant un rayon."""
+    for cle in ("lignes", "manquantes", "en_trop"):
+        etat[cle] = [{**l, "libelle": identites.get(l["monture"], {}).get("libelle",
+                                                                          l["monture"])}
+                     for l in etat.get(cle, [])]
+    etat["hors_stock"] = [identites.get(m, {}).get("libelle", m)
+                          for m in etat.get("hors_stock", [])]
+    return etat
 
 
 @app.get("/inventaire/{session}")
-def route_inventaire_etat(session: str) -> dict:
+def route_inventaire_etat(request: Request, session: str) -> dict:
     try:
-        return INVENTAIRES.etat(session)
+        return _nommer_ecarts(INVENTAIRES.etat(session), _identite(request))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
 
 
 @app.post("/inventaire/{session}/compter")
-def route_inventaire_compter(session: str,
+def route_inventaire_compter(request: Request, session: str,
                               monture: str = Query(..., description="Monture pointée"),
                               quantite: int = Query(1, ge=1, le=999)) -> dict:
     """Pointe une monture comme présente en rayon. L'identification par photo passe par
     /identifier ; ici l'opticien confirme, c'est lui qui fait foi."""
     try:
-        return INVENTAIRES.compter(session, monture, quantite)
+        return _nommer_ecarts(INVENTAIRES.compter(session, monture, quantite),
+                               _identite(request))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
     except ValueError as e:
@@ -450,23 +464,25 @@ def route_inventaire_compter(session: str,
 
 
 @app.post("/inventaire/{session}/annuler")
-def route_inventaire_annuler(session: str, monture: str = Query(...),
+def route_inventaire_annuler(request: Request, session: str, monture: str = Query(...),
                               quantite: int = Query(1, ge=1, le=999)) -> dict:
     try:
-        return INVENTAIRES.annuler_comptage(session, monture, quantite)
+        return _nommer_ecarts(INVENTAIRES.annuler_comptage(session, monture, quantite),
+                               _identite(request))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
 
 
 @app.post("/inventaire/{session}/cloturer")
 def route_inventaire_cloturer(
+    request: Request,
     session: str,
     forcer: bool = Query(False, description="Clôturer même sans avoir rien compté, ce qui "
                                              "met tout le stock à zéro"),
 ) -> dict:
     """Clôt et applique les comptages au stock : le rayon fait foi."""
     try:
-        return INVENTAIRES.cloturer(session, STOCK, forcer)
+        return _nommer_ecarts(INVENTAIRES.cloturer(session, STOCK, forcer), _identite(request))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
     except ValueError as e:
@@ -545,28 +561,42 @@ def route_modifier_fiche(monture: str,
 # ---------------------------------------------------------------------------
 
 
-@app.get("/stock")
-def route_stock(request: Request) -> dict:
-    """Le stock, enrichi de la marque du catalogue pour être lisible côté interface."""
+def _identite(request: Request) -> dict[str, dict]:
+    """Ce qu'il faut savoir d'une monture pour l'afficher : marque, référence, libellé.
+
+    Rassemble les deux origines -- le catalogue entraîné et les fiches saisies au comptoir --
+    parce qu'en rayon personne ne reconnaît « f_a1b2c3 » ni « 18 ». Tout écran qui nomme une
+    monture passe par ici : le stock comme l'inventaire, qui affichait encore des
+    identifiants techniques dans sa liste d'écarts.
+    """
     m = _modeles(request)
     marques = {}
     if m.marques_catalogue is not None:
         marques = {str(l): str(mq).strip()
                    for l, mq in zip(m.labels_catalogue, m.marques_catalogue)}
-
     fiches = FICHES.toutes()
     references = _references_catalogue()
-    lignes = []
-    for monture, e in sorted(STOCK.etat().items()):
+
+    identites: dict[str, dict] = {}
+    for monture in set(marques) | set(fiches) | set(STOCK.etat()):
         fiche = fiches.get(monture, {})
         marque = fiche.get("marque") or marques.get(monture, "")
         reference = fiche.get("reference") or references.get(monture, "")
-        # En rayon, personne ne reconnaît « f_a1b2c3 » ni « 18 » : on affiche ce qui est écrit
-        # sur la monture, et l'identifiant seulement à défaut.
+        # L'identifiant ne complète le libellé que pour une monture du catalogue sans
+        # référence : c'est alors le seul repère qui reste.
         libelle = " ".join(x for x in (marque, reference or
                                         (monture if monture not in fiches else "")) if x)
-        lignes.append({**e, "marque": marque, "reference": reference,
-                        "libelle": libelle or monture, "saisie": monture in fiches})
+        identites[monture] = {"marque": marque, "reference": reference,
+                               "libelle": libelle or monture, "saisie": monture in fiches}
+    return identites
+
+
+@app.get("/stock")
+def route_stock(request: Request) -> dict:
+    """Le stock, nommé par ce qui est écrit sur les montures."""
+    identites = _identite(request)
+    lignes = [{**e, **identites.get(monture, {"libelle": monture})}
+              for monture, e in sorted(STOCK.etat().items())]
     return {"lignes": lignes, "bilan": STOCK.bilan()}
 
 

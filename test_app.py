@@ -859,3 +859,25 @@ def test_cloture_a_vide_possible_en_forcant_par_l_api(comptoir, tmp_path, monkey
 
     assert comptoir.post(f"/inventaire/{sid}/cloturer?forcer=true").status_code == 200
     assert comptoir.get("/stock").json()["bilan"]["pieces"] == 0
+
+
+def test_l_inventaire_nomme_les_montures_dans_ses_ecarts(comptoir, tmp_path, monkeypatch):
+    """« f_a1b2c3 manque » n'aide personne devant un rayon : il faut lire la marque."""
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+    comptoir.post("/monture?marque=SILHOUETTE&reference=5515&quantite=3")
+
+    sid = comptoir.post("/inventaire").json()["session"]
+    etat = comptoir.post(f"/inventaire/{sid}/compter?monture="
+                          f"{[l['monture'] for l in comptoir.get('/stock').json()['lignes']][0]}"
+                          "&quantite=1").json()
+    assert etat["manquantes"][0]["libelle"] == "SILHOUETTE 5515"
+    assert all("libelle" in l for l in etat["lignes"])
+
+
+def test_les_sessions_listees_nomment_aussi(comptoir, tmp_path, monkeypatch):
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+    comptoir.post("/monture?marque=SILHOUETTE&reference=5515&quantite=1")
+    comptoir.post("/inventaire")
+    assert comptoir.get("/inventaire").json()[0]["manquantes"][0]["libelle"] == "SILHOUETTE 5515"

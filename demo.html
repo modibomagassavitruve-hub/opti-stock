@@ -625,7 +625,7 @@ async function listerInventaires() {
 async function ouvrirInventaire(s) { inventaireEnCours = s; await rafraichirInventaire(); }
 
 function ligneEcart(l) {
-  return `<tr><td>${esc(l.monture)}</td><td>${l.comptee} / ${l.theorique}</td>
+  return `<tr><td>${esc(l.libelle || l.monture)}</td><td>${l.comptee} / ${l.theorique}</td>
     <td style="color:${l.ecart < 0 ? 'var(--rouge)' : 'var(--vert)'}">
     ${l.ecart > 0 ? '+' : ''}${l.ecart}</td></tr>`;
 }
