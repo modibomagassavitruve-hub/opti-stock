@@ -10,22 +10,33 @@
   /* Pensé pour le téléphone d'abord : c'est là que l'opticien saisit, au comptoir, debout,
      d'une seule main. Le fond ET le texte sont déclarés explicitement -- sans fond déclaré,
      un navigateur en thème sombre peint du noir derrière du texte sombre. */
+  /* Une couleur par onglet. Sur un stand, un opticien qui prend le téléphone doit savoir en
+     un coup d'œil où il est ; le dégradé de l'en-tête et l'onglet actif changent avec lui.
+     Les teintes sont franches et sombres : lisibles à bout de bras, sous les néons d'un hall
+     d'exposition, sur un écran qu'on ne peut pas régler. */
   :root {
-    --fond: #f6f7f8; --carte: #ffffff; --encre: #16181c; --doux: #6b7280;
-    --trait: #e3e6ea; --accent: #0f7b6c; --accent-encre: #ffffff;
-    --rouge: #b3261e; --vert: #0f7b3c; --ambre: #8a5a00;
-    --ok-fond: #e7f5ec; --ok-trait: #b6dfc4;
-    --doute-fond: #fdf3e2; --doute-trait: #f0d5a8;
-    --ombre: 0 1px 2px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.05);
+    --fond: #f4f6f8; --carte: #ffffff; --encre: #11141a; --doux: #5a6472;
+    --trait: #dde3ea; --accent-encre: #ffffff;
+    --rouge: #c62828; --vert: #0c7a43; --ambre: #9a5b00;
+    --ok-fond: #e3f5ea; --ok-trait: #9ad4b2;
+    --doute-fond: #fff2dc; --doute-trait: #ecc98a;
+    --ombre: 0 1px 2px rgba(16,24,40,.06), 0 6px 18px rgba(16,24,40,.07);
+
+    --c-saisir: #0d7f6d;  --c-stock: #1668c4;   --c-inventaire: #b25a00;
+    --c-reseau: #7b3fbf;  --c-plus: #c02a5e;
+    --accent: var(--c-saisir);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --fond: #0f1113; --carte: #1a1d21; --encre: #e9eaec; --doux: #9aa1ab;
-      --trait: #2c3036; --accent: #2bb39c; --accent-encre: #06231e;
-      --rouge: #ff6b6b; --vert: #5fd18a; --ambre: #e8c46a;
-      --ok-fond: #12291d; --ok-trait: #2d6b45;
-      --doute-fond: #2c2312; --doute-trait: #6b5520;
-      --ombre: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
+      --fond: #0c0f14; --carte: #171b22; --encre: #f0f2f5; --doux: #a3adbb;
+      --trait: #2a3039; --accent-encre: #04120f;
+      --rouge: #ff7a7a; --vert: #4fd489; --ambre: #f0c060;
+      --ok-fond: #0f2a1c; --ok-trait: #2f7a4d;
+      --doute-fond: #2e2410; --doute-trait: #7a6224;
+      --ombre: 0 1px 2px rgba(0,0,0,.5), 0 6px 18px rgba(0,0,0,.4);
+
+      --c-saisir: #2fd3b4;  --c-stock: #63b0ff;   --c-inventaire: #ffb851;
+      --c-reseau: #c79bff;  --c-plus: #ff86ae;
     }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
@@ -37,68 +48,91 @@
   .page { max-width: 620px; margin: 0 auto; padding: 14px 14px 24px; }
   .page[hidden] { display: none; }
 
+  /* L'en-tête prend la couleur de l'onglet : le repère le plus visible de l'écran. */
   header {
-    position: sticky; top: 0; z-index: 10; background: var(--fond);
-    padding: 12px 14px 8px; border-bottom: 1px solid var(--trait);
+    position: sticky; top: 0; z-index: 10;
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 62%, #000));
+    color: #fff; padding: 14px 14px 13px;
+    box-shadow: 0 2px 12px rgba(0,0,0,.18);
   }
-  header .barre { max-width: 620px; margin: 0 auto; display: flex; align-items: baseline;
+  header .barre { max-width: 620px; margin: 0 auto; display: flex; align-items: center;
     justify-content: space-between; gap: 10px; }
-  header h1 { font-size: 1.05rem; margin: 0; letter-spacing: -.01em; }
-  header .etat { font-size: .78rem; color: var(--doux); }
+  header h1 { font-size: 1.3rem; margin: 0; letter-spacing: -.02em; font-weight: 800; }
+  header .etat { font-size: .8rem; font-weight: 600; background: rgba(255,255,255,.22);
+    padding: 4px 10px; border-radius: 999px; }
 
-  h2 { font-size: 1.15rem; margin: 2px 0 2px; letter-spacing: -.01em; }
-  .sous { color: var(--doux); font-size: .87rem; margin: 0 0 14px; }
+  h2 { font-size: 1.4rem; margin: 4px 0 2px; letter-spacing: -.02em; font-weight: 800;
+    color: var(--accent); }
+  .sous { color: var(--doux); font-size: .93rem; margin: 0 0 16px; }
 
+  /* Un filet de couleur sur le bord gauche : la carte se rattache visuellement à l'onglet. */
   .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: 14px;
-    padding: 14px; margin-bottom: 12px; box-shadow: var(--ombre); }
+    border-left: 5px solid var(--accent);
+    padding: 15px; margin-bottom: 13px; box-shadow: var(--ombre); }
+  .carte h2 { font-size: 1.08rem; }
 
   label.champ { display: block; margin-bottom: 10px; }
-  label.champ > span { display: block; font-size: .78rem; color: var(--doux);
-    margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  label.champ > span { display: block; font-size: .8rem; color: var(--accent);
+    margin-bottom: 5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
   input, select, textarea {
-    width: 100%; padding: 12px 12px; font-size: 16px;   /* 16px : evite le zoom iOS */
-    border: 1px solid var(--trait); border-radius: 10px;
+    width: 100%; padding: 13px 12px; font-size: 16px;   /* 16px : evite le zoom iOS */
+    border: 2px solid var(--trait); border-radius: 11px;
     background: var(--fond); color: var(--encre); font-family: inherit;
   }
-  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
   .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 
-  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--trait);
-    background: var(--carte); color: var(--encre); padding: 12px 16px; min-height: 46px; }
+  button { font: inherit; cursor: pointer; border-radius: 11px; border: 2px solid var(--trait);
+    background: var(--carte); color: var(--encre); padding: 12px 16px; min-height: 48px;
+    font-weight: 600; }
   button:active { transform: scale(.985); }
-  button:disabled { opacity: .5; }
+  button:disabled { opacity: .45; }
   .primaire { background: var(--accent); color: var(--accent-encre); border-color: transparent;
-    font-weight: 600; width: 100%; }
-  .petit { padding: 7px 12px; min-height: 36px; font-size: .85rem; }
+    font-weight: 800; width: 100%; font-size: 1.05rem; min-height: 54px;
+    box-shadow: 0 3px 12px color-mix(in srgb, var(--accent) 38%, transparent); }
+  .petit { padding: 8px 13px; min-height: 40px; font-size: .88rem;
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--trait));
+    color: var(--accent); }
 
   /* Zone photo : la cible la plus grande de l'écran, c'est le premier geste au comptoir. */
-  .photo-zone { position: relative; border: 2px dashed var(--trait); border-radius: 14px;
-    background: var(--fond); aspect-ratio: 4/3; display: grid; place-items: center;
-    overflow: hidden; text-align: center; color: var(--doux); margin-bottom: 12px; }
+  .photo-zone { position: relative; border: 3px dashed color-mix(in srgb, var(--accent) 45%, var(--trait));
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--accent) 7%, var(--fond));
+    aspect-ratio: 4/3; display: grid; place-items: center;
+    overflow: hidden; text-align: center; color: var(--accent); margin-bottom: 13px; }
   .photo-zone img { width: 100%; height: 100%; object-fit: cover; }
   .photo-zone input[type=file] { position: absolute; inset: 0; opacity: 0; width: 100%;
     height: 100%; }
-  .photo-zone .invite { font-size: .9rem; padding: 0 20px; pointer-events: none; }
-  .photo-zone .invite b { display: block; font-size: 2rem; margin-bottom: 4px; }
+  .photo-zone .invite { font-size: 1rem; font-weight: 700; padding: 0 20px; pointer-events: none; }
+  .photo-zone .invite b { display: block; font-size: 2.6rem; margin-bottom: 6px; }
 
-  .bandeau { padding: 11px 13px; border-radius: 11px; margin: 10px 0; font-size: .9rem; }
-  .ok { background: var(--ok-fond); border: 1px solid var(--ok-trait); color: var(--vert); }
-  .doute { background: var(--doute-fond); border: 1px solid var(--doute-trait); color: var(--ambre); }
-  .err { color: var(--rouge); font-size: .9rem; }
-  .aide { color: var(--doux); font-size: .85rem; }
+  .bandeau { padding: 12px 14px; border-radius: 12px; margin: 11px 0; font-size: .93rem;
+    border-left: 5px solid currentColor; }
+  .ok { background: var(--ok-fond); border: 1px solid var(--ok-trait);
+    border-left: 5px solid var(--vert); color: var(--vert); }
+  .doute { background: var(--doute-fond); border: 1px solid var(--doute-trait);
+    border-left: 5px solid var(--ambre); color: var(--ambre); }
+  .err { color: var(--rouge); font-size: .92rem; font-weight: 600; }
+  .aide { color: var(--doux); font-size: .87rem; }
 
-  .ligne { display: flex; align-items: center; gap: 11px; padding: 11px 0;
+  .ligne { display: flex; align-items: center; gap: 9px; padding: 11px 0;
     border-bottom: 1px solid var(--trait); }
   .ligne:last-child { border-bottom: none; }
-  .ligne img { width: 52px; height: 52px; border-radius: 9px; object-fit: cover;
-    background: var(--fond); flex: none; }
+  .ligne img { width: 48px; height: 48px; border-radius: 10px; object-fit: cover;
+    background: var(--fond); flex: none; border: 1px solid var(--trait); }
   .ligne .txt { flex: 1; min-width: 0; }
-  /* Deux lignes plutôt qu'une troncature : « RAY-BAN RB5... » n'identifie aucune monture. */
-  .ligne .nom { font-weight: 600; font-size: .95rem; overflow: hidden;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-  .ligne .meta { font-size: .8rem; color: var(--doux); }
-  .qte { font-weight: 700; font-size: 1.05rem; min-width: 30px; text-align: right; }
-  .qte.zero { color: var(--doux); font-weight: 500; }
+  /* Le nom peut prendre trois lignes : « NEMEZIS DAMASE... » n'identifie aucune monture, et
+     c'est la seule chose que l'opticien cherche des yeux dans cette liste. */
+  .ligne .nom { font-weight: 700; font-size: .97rem; line-height: 1.25; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+  /* Boutons de mouvement compacts : la place va au nom. */
+  .ligne .petit { min-width: 42px; padding: 8px 6px; font-size: 1.1rem; font-weight: 800; }
+  .ligne .meta { font-size: .83rem; color: var(--doux); }
+  /* La quantité est le chiffre qu'on cherche des yeux : pastille colorée, lisible de loin. */
+  .qte { font-weight: 800; font-size: 1.1rem; min-width: 38px; text-align: center;
+    padding: 5px 8px; border-radius: 9px; flex: none;
+    background: color-mix(in srgb, var(--accent) 16%, transparent); color: var(--accent); }
+  .qte.zero { background: color-mix(in srgb, var(--rouge) 14%, transparent); color: var(--rouge); }
 
   .grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
   .vignette { border: 1px solid var(--trait); border-radius: 11px; overflow: hidden;
@@ -113,16 +147,24 @@
   td { padding: 7px 0; border-bottom: 1px solid var(--trait); }
   td:last-child { text-align: right; font-weight: 700; }
 
-  /* Navigation au pouce : en bas, toujours atteignable. */
+  /* Navigation au pouce : en bas, toujours atteignable. L'onglet actif est souligné d'un
+     trait épais de sa propre couleur -- repérable sans lire. */
   nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
     background: var(--carte); border-top: 1px solid var(--trait);
     padding-bottom: env(safe-area-inset-bottom);
-    display: flex; }
+    box-shadow: 0 -2px 14px rgba(0,0,0,.09); display: flex; }
   nav button { flex: 1; border: none; background: none; border-radius: 0;
-    padding: 9px 2px 8px; color: var(--doux); font-size: .68rem; min-height: 60px;
-    display: flex; flex-direction: column; align-items: center; gap: 3px; }
-  nav button .i { font-size: 1.35rem; line-height: 1; }
-  nav button.actif { color: var(--accent); font-weight: 600; }
+    padding: 10px 2px 8px; color: var(--doux); font-size: .7rem; min-height: 64px;
+    font-weight: 600; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    border-top: 4px solid transparent; }
+  nav button .i { font-size: 1.5rem; line-height: 1; filter: grayscale(.55); }
+  nav button.actif { font-weight: 800; }
+  nav button.actif .i { filter: none; transform: scale(1.12); }
+  nav button[data-page=saisir].actif     { color: var(--c-saisir);     border-top-color: var(--c-saisir); }
+  nav button[data-page=stock].actif      { color: var(--c-stock);      border-top-color: var(--c-stock); }
+  nav button[data-page=inventaire].actif { color: var(--c-inventaire); border-top-color: var(--c-inventaire); }
+  nav button[data-page=reseau].actif     { color: var(--c-reseau);     border-top-color: var(--c-reseau); }
+  nav button[data-page=plus].actif       { color: var(--c-plus);       border-top-color: var(--c-plus); }
 
   .vide { text-align: center; color: var(--doux); padding: 26px 16px; font-size: .9rem; }
   .vide b { display: block; font-size: 2rem; margin-bottom: 6px; opacity: .55; }
@@ -337,6 +379,14 @@ function onglet(nom) {
   document.querySelectorAll('.page').forEach(p => p.hidden = p.id !== 'page-' + nom);
   document.querySelectorAll('nav button').forEach(b =>
     b.classList.toggle('actif', b.dataset.page === nom));
+
+  // Toute la page prend la couleur de l'onglet : en-tête, titres, boutons, pastilles. Sur un
+  // stand, savoir où l'on est doit être instantané, sans avoir à lire.
+  document.documentElement.style.setProperty('--accent', `var(--c-${nom})`);
+  const teinte = getComputedStyle(document.documentElement)
+    .getPropertyValue(`--c-${nom}`).trim();
+  document.querySelector('meta[name=theme-color]').setAttribute('content', teinte);
+
   window.scrollTo(0, 0);
   if (nom === 'stock') chargerStock();
   if (nom === 'plus') bilan();
