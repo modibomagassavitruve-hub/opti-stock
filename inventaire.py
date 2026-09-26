@@ -77,12 +77,17 @@ class Inventaire:
                                  "quantite": max(1, quantite)})
         return self.etat(session)
 
-    def cloturer(self, session: str, stock=None) -> dict:
+    def cloturer(self, session: str, stock=None, forcer: bool = False) -> dict:
         """Clôt la session et, si un stock est fourni, y applique les quantités comptées.
 
         C'est le sens du récolement : le rayon fait foi. Les montures non comptées passent à
         zéro -- ne pas les toucher laisserait le stock affirmer qu'elles sont là alors qu'on
         vient de constater le contraire.
+
+        D'où un garde-fou : clôturer SANS AVOIR RIEN COMPTÉ viderait le stock entier d'un
+        geste. C'est toujours une fausse manœuvre -- personne n'ouvre un inventaire pour
+        déclarer sa boutique vide -- et c'est arrivé en trois secondes lors d'un test. On
+        refuse, sauf `forcer` explicite pour le cas réel d'une boutique liquidée.
         """
         lignes = self._lignes(session)
         if not lignes:
@@ -91,6 +96,12 @@ class Inventaire:
             raise ValueError(f"Inventaire {session} déjà clos")
 
         etat = self.etat(session)
+        if stock is not None and not forcer and etat["pieces_attendues"] and \
+                not etat["pieces_comptees"]:
+            raise ValueError(
+                f"Aucune monture comptée : clôturer mettrait à zéro les "
+                f"{etat['pieces_attendues']} pièces du stock. Comptez d'abord, ou forcez "
+                f"explicitement si la boutique est réellement vide.")
         if stock is not None:
             for ligne in etat["lignes"]:
                 if ligne["ecart"]:

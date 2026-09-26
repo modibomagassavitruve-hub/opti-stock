@@ -836,3 +836,26 @@ def test_monture_du_catalogue_sans_reference_garde_son_identifiant(comptoir, mon
     comptoir.post("/stock/m1/entree?quantite=1")
     ligne = [l for l in comptoir.get("/stock").json()["lignes"] if l["monture"] == "m1"][0]
     assert ligne["libelle"] == "Osmose m1"
+
+
+def test_cloture_a_vide_refusee_par_l_api(comptoir, tmp_path, monkeypatch):
+    """Un opticien curieux qui tape « Clôturer » sur un stand ne doit pas vider le stock."""
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+    comptoir.post("/monture?marque=OCTIKA&quantite=4")
+    sid = comptoir.post("/inventaire").json()["session"]
+
+    r = comptoir.post(f"/inventaire/{sid}/cloturer")
+    assert r.status_code == 409
+    assert "Aucune monture comptée" in r.json()["detail"]
+    assert comptoir.get("/stock").json()["bilan"]["pieces"] == 4, "stock intact"
+
+
+def test_cloture_a_vide_possible_en_forcant_par_l_api(comptoir, tmp_path, monkeypatch):
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+    comptoir.post("/monture?marque=OCTIKA&quantite=4")
+    sid = comptoir.post("/inventaire").json()["session"]
+
+    assert comptoir.post(f"/inventaire/{sid}/cloturer?forcer=true").status_code == 200
+    assert comptoir.get("/stock").json()["bilan"]["pieces"] == 0

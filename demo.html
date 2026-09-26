@@ -656,7 +656,29 @@ async function rafraichirInventaire() {
 async function cloturerInventaire() {
   if (!confirm('Clôturer applique les quantités comptées au stock. Continuer ?')) return;
   const r = await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
-  if (!r.ok) { alert((await r.json()).detail || 'Impossible'); return; }
+  if (!r.ok) {
+    const motif = (await r.json()).detail || 'Impossible';
+    // Le serveur refuse une clôture à vide, qui mettrait tout le stock à zéro. On relaie son
+    // explication et on ne propose de forcer qu'ensuite, jamais dans le même geste.
+    if (r.status === 409 && motif.includes('Aucune monture comptée')) {
+      el('sortieInventaire').insertAdjacentHTML('afterbegin',
+        `<div class="bandeau doute">${esc(motif)}
+           <button class="petit" style="margin-top:9px;width:100%"
+             onclick="cloturerAVide()">Ma boutique est réellement vide — clôturer quand même</button>
+         </div>`);
+      return;
+    }
+    alert(motif);
+    return;
+  }
+  await rafraichirInventaire();
+  stockCache = [];
+}
+
+async function cloturerAVide() {
+  if (!confirm('Cela mettra TOUT votre stock à zéro. En êtes-vous certain ?')) return;
+  await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer?forcer=true',
+              { method: 'POST' });
   await rafraichirInventaire();
   stockCache = [];
 }

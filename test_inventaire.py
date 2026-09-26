@@ -131,11 +131,15 @@ def test_cloture_laisse_une_trace_de_la_correction(inv, stock):
 
 def test_monture_non_comptee_passe_a_zero_a_la_cloture(inv, stock):
     """Ne pas y toucher laisserait le stock affirmer qu'elle est là, alors qu'on vient de
-    constater le contraire."""
+    constater le contraire. On compte une autre monture pour rester dans un inventaire
+    réel -- un inventaire où l'on n'a rien compté du tout est refusé, voir plus bas."""
     stock.entrer("disparue", 2)
-    s = inv.demarrer({"disparue": 2})
+    stock.entrer("presente", 1)
+    s = inv.demarrer({"disparue": 2, "presente": 1})
+    inv.compter(s, "presente", 1)
     inv.cloturer(s, stock)
     assert stock.quantite("disparue") == 0
+    assert stock.quantite("presente") == 1
 
 
 def test_cloture_sans_stock_ne_corrige_rien(inv):
@@ -175,3 +179,42 @@ def test_sessions_listees(inv):
 
 def test_aucune_session_ne_plante_pas(inv):
     assert inv.sessions() == []
+
+
+def test_cloture_sans_rien_compter_refusee(inv, stock):
+    """Clôturer sans avoir compté viderait le stock entier d'un geste. C'est toujours une
+    fausse manœuvre -- personne n'ouvre un inventaire pour déclarer sa boutique vide -- et
+    c'est arrivé en trois secondes lors d'un test."""
+    stock.entrer("a", 5)
+    stock.entrer("b", 3)
+    s = inv.demarrer({"a": 5, "b": 3})
+
+    with pytest.raises(ValueError, match="Aucune monture comptée"):
+        inv.cloturer(s, stock)
+    assert stock.quantite("a") == 5, "le stock est intact"
+    assert inv.etat(s)["statut"] == "en_cours", "la session reste ouverte"
+
+
+def test_cloture_a_vide_possible_en_forcant(inv, stock):
+    """Le cas réel d'une boutique liquidée doit rester faisable."""
+    stock.entrer("a", 5)
+    s = inv.demarrer({"a": 5})
+    inv.cloturer(s, stock, forcer=True)
+    assert stock.quantite("a") == 0
+
+
+def test_une_seule_monture_comptee_suffit_a_cloturer(inv, stock):
+    """Le garde-fou ne vise que le zéro absolu : un inventaire peut légitimement constater
+    d'énormes écarts."""
+    stock.entrer("a", 5)
+    stock.entrer("b", 3)
+    s = inv.demarrer({"a": 5, "b": 3})
+    inv.compter(s, "a", 1)
+    inv.cloturer(s, stock)
+    assert (stock.quantite("a"), stock.quantite("b")) == (1, 0)
+
+
+def test_cloture_sans_stock_reste_libre(inv):
+    """Sans stock à corriger, il n'y a rien à protéger."""
+    s = inv.demarrer({"a": 5})
+    assert inv.cloturer(s)["statut"] == "clos"

@@ -459,10 +459,14 @@ def route_inventaire_annuler(session: str, monture: str = Query(...),
 
 
 @app.post("/inventaire/{session}/cloturer")
-def route_inventaire_cloturer(session: str) -> dict:
+def route_inventaire_cloturer(
+    session: str,
+    forcer: bool = Query(False, description="Clôturer même sans avoir rien compté, ce qui "
+                                             "met tout le stock à zéro"),
+) -> dict:
     """Clôt et applique les comptages au stock : le rayon fait foi."""
     try:
-        return INVENTAIRES.cloturer(session, STOCK)
+        return INVENTAIRES.cloturer(session, STOCK, forcer)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
     except ValueError as e:
