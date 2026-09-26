@@ -47,34 +47,34 @@ done
 curl -sf "http://127.0.0.1:$PORT/sante" >/dev/null || { echo "L'API n'a pas démarré."; nettoyer; }
 echo "API prête."
 
-echo "Ouverture du tunnel public…"
-cloudflared tunnel --url "http://localhost:$PORT" >"$JOURNAL_CF" 2>&1 &
-PID_CF=$!
-
-URL=""
-for _ in $(seq 1 45); do
-  URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" "$JOURNAL_CF" | head -1)
-  [[ -n "$URL" ]] && break
-  sleep 1
-done
-[[ -n "$URL" ]] || { echo "Tunnel non établi. Voir $JOURNAL_CF"; nettoyer; }
+# Ouvre un tunnel et renvoie son adresse, ou vide si elle n'apparaît pas.
+ouvrir_tunnel() {
+  : >"$JOURNAL_CF"
+  cloudflared tunnel --url "http://localhost:$PORT" >"$JOURNAL_CF" 2>&1 &
+  PID_CF=$!
+  for _ in $(seq 1 45); do
+    URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" "$JOURNAL_CF" | head -1)
+    [[ -n "$URL" ]] && return 0
+    sleep 1
+  done
+  return 1
+}
 
 # Le QR dans le terminal suffit à faire scanner quelqu'un en face de soi ; le PNG sert à
 # l'afficher en grand sur l'écran, ce qui marche mieux sur un stand.
-"$PYTHON" - "$URL" <<'PY'
+annoncer() {
+  "$PYTHON" - "$1" <<'PY'
 import sys
 import segno
-url = sys.argv[1]
-qr = segno.make(url, error="m")
+qr = segno.make(sys.argv[1], error="m")
 print()
 qr.terminal(compact=True, border=2)
 qr.save("qr_demo.png", scale=12, border=3)
 PY
-
-cat <<FIN
+  cat <<FIN
 
   ═══════════════════════════════════════════════════════════
-   $URL
+   $1
   ═══════════════════════════════════════════════════════════
 
   Faites scanner le QR ci-dessus, ou ouvrez qr_demo.png en
@@ -86,5 +86,28 @@ cat <<FIN
   Ctrl+C pour arrêter.
 
 FIN
+}
 
-wait
+echo "Ouverture du tunnel public…"
+ouvrir_tunnel || { echo "Tunnel non établi. Voir $JOURNAL_CF"; nettoyer; }
+annoncer "$URL"
+
+# Surveillance. Un tunnel éphémère Cloudflare peut perdre son adresse sans que le processus
+# s'arrête : constaté après trois heures. Le QR affiché devient alors muet, et sur un stand
+# on ne s'en aperçoit qu'en voyant un opticien s'éloigner. On vérifie donc l'adresse depuis
+# l'extérieur, et on en rouvre une en annonçant clairement le changement.
+while sleep 30; do
+  kill -0 "$PID_API" 2>/dev/null || { echo "L'API s'est arrêtée."; nettoyer; }
+  curl -sf --max-time 10 -o /dev/null "$URL/sante" && continue
+
+  echo
+  echo "  ⚠  Le tunnel ne répond plus — réouverture…"
+  kill "$PID_CF" 2>/dev/null
+  if ouvrir_tunnel; then
+    echo "  ⚠  NOUVELLE ADRESSE : l'ancien QR ne marche plus, refaites scanner."
+    annoncer "$URL"
+  else
+    echo "  ⚠  Réouverture impossible. Vérifiez la connexion, puis relancez ce script."
+    sleep 30
+  fi
+done
