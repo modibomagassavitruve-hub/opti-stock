@@ -255,14 +255,10 @@ def test_photo_monture_refuse_une_etiquette_inconnue(client, tmp_path):
     assert client.get("/monture/..%2F..%2Fetc%2Fpasswd/photo").status_code == 404
 
 
-def test_inventaire_bout_en_bout(client, tmp_path, monkeypatch):
+def test_inventaire_bout_en_bout(stock_api):
     """Le parcours complet : le stock annonce un théorique, le rayon dit autre chose, et la
     clôture corrige le stock d'après le rayon."""
-    from inventaire import Inventaire
-    from stock import Stock
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
-    stock = Stock(tmp_path / "stock.jsonl")
-    monkeypatch.setattr(app_module, "STOCK", stock)
+    client, stock = stock_api
     stock.entrer("talla/bogart2", 3)
     stock.entrer("talla/gravita9015", 1)
 
@@ -283,11 +279,9 @@ def test_inventaire_bout_en_bout(client, tmp_path, monkeypatch):
     assert client.post(f"/inventaire/{sid}/cloturer").status_code == 409
 
 
-def test_inventaire_inconnu_renvoie_404(client, tmp_path, monkeypatch):
-    from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path))
-    assert client.get("/inventaire/zzz").status_code == 404
-    assert client.post("/inventaire/zzz/compter?monture=a").status_code == 404
+def test_inventaire_inconnu_renvoie_404(comptoir):
+    assert comptoir.get("/inventaire/zzz").status_code == 404
+    assert comptoir.post("/inventaire/zzz/compter?monture=a").status_code == 404
 
 
 def test_route_sante(client):
@@ -330,32 +324,41 @@ def test_route_identifier_sans_fichier_rejete(client):
 
 # ------------------------------------------------- routes réseau (module 3)
 @pytest.fixture()
-def reseau_vide(client, tmp_path, monkeypatch):
-    """Réseau isolé par test. Sans cette redirection, les tests écriraient dans le vrai journal
-    de la boutique : des inscriptions et des messages factices dans les données de production."""
+def isole(client, tmp_path, monkeypatch):
+    """Cloisonne le stockage par boutique et le réseau dans un dossier temporaire.
+
+    Sans cette redirection, les tests écriraient dans les vraies données de la boutique : des
+    montures et des messages factices en production. N'authentifie pas le client -- plusieurs
+    tests vérifient justement qu'une route refuse un appel sans jeton."""
     from reseau import Reseau
-    from stock import Stock
 
+    monkeypatch.setattr(app_module, "_BOUTIQUES", tmp_path / "boutiques")
+    monkeypatch.setattr(app_module, "_PHOTOS_FICHES", tmp_path / "photos_fiches")
     monkeypatch.setattr(app_module, "RESEAU", Reseau(tmp_path / "reseau.jsonl"))
-    monkeypatch.setattr(app_module, "_references_catalogue",
-                        lambda: {"m1": "OS866", "m2": "6135"})
     client.app.state.modeles = _modeles_avec_marques()
-
-    # Le réseau ne propose que ce qui reste en rayon : sans stock, rien n'est partageable.
-    stock = Stock(tmp_path / "stock.jsonl")
-    monkeypatch.setattr(app_module, "STOCK", stock)
-    for monture in ("m1", "m2", "m3"):
-        stock.entrer(monture, 1)
     return client
 
 
 @pytest.fixture()
+def reseau_vide(isole, monkeypatch):
+    monkeypatch.setattr(app_module, "_references_catalogue",
+                        lambda: {"m1": "OS866", "m2": "6135"})
+    return isole
+
+
+@pytest.fixture()
 def reseau(reseau_vide):
-    """Le réseau isolé, avec deux boutiques déjà inscrites."""
+    """Deux boutiques inscrites, chacune avec son propre rayon."""
     client = reseau_vide
     a = client.post("/reseau/inscription?nom=Optique Centre&ville=Lyon").json()
     b = client.post("/reseau/inscription?nom=Vision Plus&ville=Villeurbanne").json()
-    return client, {"X-Boutique-Jeton": a["jeton"]}, {"X-Boutique-Jeton": b["jeton"]}, a, b
+    entete_a = {"X-Boutique-Jeton": a["jeton"]}
+    entete_b = {"X-Boutique-Jeton": b["jeton"]}
+    # Le réseau ne propose que ce qui reste en rayon : sans stock, rien n'est partageable.
+    for entete in (entete_a, entete_b):
+        for monture in ("m1", "m2", "m3"):
+            client.post(f"/stock/{monture}/entree?quantite=1", headers=entete)
+    return client, entete_a, entete_b, a, b
 
 
 def test_inscription_renvoie_un_jeton(reseau_vide):
@@ -586,12 +589,10 @@ def test_saisie_confirmation_explicite_valide(saisie):
 
 # ------------------------------------------------- stock (module 1)
 @pytest.fixture()
-def stock_api(client, tmp_path, monkeypatch):
-    from stock import Stock
-    s = Stock(tmp_path / "stock.jsonl")
-    monkeypatch.setattr(app_module, "STOCK", s)
-    client.app.state.modeles = _modeles_avec_marques()
-    return client, s
+def stock_api(isole):
+    d = isole.post("/reseau/inscription?nom=Ma Boutique&ville=Lyon").json()
+    isole.headers.update({"X-Boutique-Jeton": d["jeton"]})
+    return isole, app_module.stock_de(d["boutique"])
 
 
 def test_entree_en_stock_puis_lecture(stock_api):
@@ -650,13 +651,13 @@ def test_le_reseau_ne_propose_que_ce_qui_reste_en_rayon(reseau):
     client.post("/reseau/partage?montures=m1", headers=entete_b)
     assert len(client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json()) == 1
 
-    client.post("/stock/m1/sortie?quantite=1&motif=vente")
+    client.post("/stock/m1/sortie?quantite=1&motif=vente", headers=entete_b)
     assert client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json() == []
 
 
 def test_monture_epuisee_nest_plus_partageable(reseau):
     client, entete_a, _, _, _ = reseau
-    client.post("/stock/m1/sortie?quantite=1&motif=vente")
+    client.post("/stock/m1/sortie?quantite=1&motif=vente", headers=entete_a)
     libelles = {m["libelle"] for m in
                 client.get("/reseau/mon-stock", headers=entete_a).json()["montures"]}
     assert "m1" not in libelles
@@ -664,7 +665,7 @@ def test_monture_epuisee_nest_plus_partageable(reseau):
 
 def test_le_partage_porte_la_quantite_disponible(reseau):
     client, entete_a, entete_b, _, _ = reseau
-    client.post("/stock/m2/entree?quantite=4")
+    client.post("/stock/m2/entree?quantite=4", headers=entete_b)
     client.post("/reseau/partage?montures=m2", headers=entete_b)
     trouve = client.get("/reseau/chercher?marque=Maritza", headers=entete_a).json()[0]
     assert trouve["quantite"] == 5
@@ -676,11 +677,11 @@ def test_la_disponibilite_est_verifiee_a_la_recherche_pas_au_partage(reseau):
     repartager quoi que ce soit."""
     client, entete_a, entete_b, _, _ = reseau
     client.post("/reseau/partage?montures=m1", headers=entete_b)
-    client.post("/stock/m1/sortie?quantite=1&motif=vente")
+    client.post("/stock/m1/sortie?quantite=1&motif=vente", headers=entete_b)
 
     assert client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json() == []
     # puis elle en reçoit à nouveau : elle réapparaît sans nouveau partage
-    client.post("/stock/m1/entree?quantite=2")
+    client.post("/stock/m1/entree?quantite=2", headers=entete_b)
     trouve = client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json()
     assert len(trouve) == 1 and trouve[0]["quantite"] == 2
 
@@ -722,13 +723,11 @@ def test_route_seuil_mesure_le_seuil_en_service(client, tmp_path, monkeypatch):
 
 # ------------------------------------------------- saisie d'une monture au comptoir
 @pytest.fixture()
-def comptoir(client, tmp_path, monkeypatch):
-    from fiches import Fiches
-    from stock import Stock
-    monkeypatch.setattr(app_module, "FICHES", Fiches(tmp_path / "f"))
-    monkeypatch.setattr(app_module, "STOCK", Stock(tmp_path / "stock.jsonl"))
-    client.app.state.modeles = _modeles_avec_marques()
-    return client
+def comptoir(isole):
+    """Client authentifié comme une boutique : toutes ses requêtes portent son jeton."""
+    jeton = isole.post("/reseau/inscription?nom=Ma Boutique&ville=Lyon").json()["jeton"]
+    isole.headers.update({"X-Boutique-Jeton": jeton})
+    return isole
 
 
 def test_creer_une_monture_inconnue_du_catalogue(comptoir):
@@ -807,10 +806,8 @@ def test_corriger_une_fiche_inconnue(comptoir):
     assert comptoir.patch("/monture/f_rien?marque=A").status_code == 404
 
 
-def test_monture_saisie_comptable_en_inventaire(comptoir, tmp_path, monkeypatch):
+def test_monture_saisie_comptable_en_inventaire(comptoir):
     """Une monture saisie au comptoir doit entrer dans l'inventaire comme les autres."""
-    from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
     monture = comptoir.post("/monture?marque=OCTIKA&quantite=3").json()["fiche"]["monture"]
 
     sid = comptoir.post("/inventaire?libelle=silmo").json()["session"]
@@ -838,10 +835,8 @@ def test_monture_du_catalogue_sans_reference_garde_son_identifiant(comptoir, mon
     assert ligne["libelle"] == "Osmose m1"
 
 
-def test_cloture_a_vide_refusee_par_l_api(comptoir, tmp_path, monkeypatch):
+def test_cloture_a_vide_refusee_par_l_api(comptoir):
     """Un opticien curieux qui tape « Clôturer » sur un stand ne doit pas vider le stock."""
-    from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
     comptoir.post("/monture?marque=OCTIKA&quantite=4")
     sid = comptoir.post("/inventaire").json()["session"]
 
@@ -851,9 +846,7 @@ def test_cloture_a_vide_refusee_par_l_api(comptoir, tmp_path, monkeypatch):
     assert comptoir.get("/stock").json()["bilan"]["pieces"] == 4, "stock intact"
 
 
-def test_cloture_a_vide_possible_en_forcant_par_l_api(comptoir, tmp_path, monkeypatch):
-    from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+def test_cloture_a_vide_possible_en_forcant_par_l_api(comptoir):
     comptoir.post("/monture?marque=OCTIKA&quantite=4")
     sid = comptoir.post("/inventaire").json()["session"]
 
@@ -861,10 +854,8 @@ def test_cloture_a_vide_possible_en_forcant_par_l_api(comptoir, tmp_path, monkey
     assert comptoir.get("/stock").json()["bilan"]["pieces"] == 0
 
 
-def test_l_inventaire_nomme_les_montures_dans_ses_ecarts(comptoir, tmp_path, monkeypatch):
+def test_l_inventaire_nomme_les_montures_dans_ses_ecarts(comptoir):
     """« f_a1b2c3 manque » n'aide personne devant un rayon : il faut lire la marque."""
-    from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
     comptoir.post("/monture?marque=SILHOUETTE&reference=5515&quantite=3")
 
     sid = comptoir.post("/inventaire").json()["session"]
@@ -875,9 +866,102 @@ def test_l_inventaire_nomme_les_montures_dans_ses_ecarts(comptoir, tmp_path, mon
     assert all("libelle" in l for l in etat["lignes"])
 
 
-def test_les_sessions_listees_nomment_aussi(comptoir, tmp_path, monkeypatch):
-    from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+def test_les_sessions_listees_nomment_aussi(comptoir):
     comptoir.post("/monture?marque=SILHOUETTE&reference=5515&quantite=1")
     comptoir.post("/inventaire")
     assert comptoir.get("/inventaire").json()[0]["manquantes"][0]["libelle"] == "SILHOUETTE 5515"
+
+
+def test_recherche_topk_rend_des_montures_distinctes():
+    """k montures, pas k photos. Le catalogue en compte trois à cinq par monture : sans
+    déduplication, une requête renvoyait « 18, 18, 18, 18, 18, 11 » — cinq vignettes
+    identiques, et une seule véritable alternative offerte à l'opticien."""
+    emb = np.array([[1.0, 0.0], [0.99, 0.14], [0.98, 0.2], [0.0, 1.0]], dtype="float32")
+    labels = np.array(["a", "a", "a", "b"])
+    res = recherche_topk(np.array([1.0, 0.0], dtype="float32"), emb, labels, k=3)
+    assert [r["monture"] for r in res] == ["a", "b"]
+
+
+def test_chaque_monture_garde_son_meilleur_score():
+    emb = np.array([[0.6, 0.8], [1.0, 0.0]], dtype="float32")
+    labels = np.array(["a", "a"])
+    res = recherche_topk(np.array([1.0, 0.0], dtype="float32"), emb, labels, k=5)
+    assert len(res) == 1 and res[0]["similarite"] == 1.0
+
+
+# ------------------------------------------------- cloisonnement des boutiques
+def test_deux_boutiques_ne_voient_pas_le_stock_l_une_de_l_autre(reseau_vide):
+    """Le point central : un opticien qui s'inscrit au salon doit trouver SON rayon, pas celui
+    du confrère qui a essayé l'application avant lui."""
+    client = reseau_vide
+    a = client.post("/reseau/inscription?nom=Boutique A&ville=Lyon").json()
+    b = client.post("/reseau/inscription?nom=Boutique B&ville=Nice").json()
+    ea, eb = {"X-Boutique-Jeton": a["jeton"]}, {"X-Boutique-Jeton": b["jeton"]}
+
+    client.post("/monture?marque=OCTIKA&reference=OS866&quantite=3", headers=ea)
+    assert client.get("/stock", headers=ea).json()["bilan"]["pieces"] == 3
+    assert client.get("/stock", headers=eb).json()["bilan"]["pieces"] == 0, "B part d'un rayon vide"
+    assert client.get("/monture", headers=eb).json() == [], "ni les fiches de A"
+
+
+def test_les_inventaires_sont_cloisonnes(reseau_vide):
+    client = reseau_vide
+    a = client.post("/reseau/inscription?nom=Boutique A&ville=Lyon").json()
+    b = client.post("/reseau/inscription?nom=Boutique B&ville=Nice").json()
+    ea, eb = {"X-Boutique-Jeton": a["jeton"]}, {"X-Boutique-Jeton": b["jeton"]}
+
+    sid = client.post("/inventaire?libelle=chez A", headers=ea).json()["session"]
+    assert client.get("/inventaire", headers=eb).json() == []
+    assert client.get(f"/inventaire/{sid}", headers=eb).status_code == 404
+
+
+def test_une_vente_chez_l_une_ne_touche_pas_l_autre(reseau_vide):
+    client = reseau_vide
+    a = client.post("/reseau/inscription?nom=Boutique A&ville=Lyon").json()
+    b = client.post("/reseau/inscription?nom=Boutique B&ville=Nice").json()
+    ea, eb = {"X-Boutique-Jeton": a["jeton"]}, {"X-Boutique-Jeton": b["jeton"]}
+
+    for entete in (ea, eb):
+        client.post("/stock/m1/entree?quantite=2", headers=entete)
+    client.post("/stock/m1/sortie?quantite=1&motif=vente", headers=ea)
+
+    assert client.get("/stock/m1", headers=ea).json()["quantite"] == 1
+    assert client.get("/stock/m1", headers=eb).json()["quantite"] == 2
+
+
+def test_les_routes_de_stock_exigent_un_jeton(reseau_vide):
+    client = reseau_vide
+    for methode, url in [("get", "/stock"), ("get", "/stock/m1"), ("post", "/stock/m1/entree"),
+                          ("post", "/stock/m1/sortie"), ("get", "/monture"),
+                          ("post", "/monture?marque=X"), ("get", "/inventaire"),
+                          ("post", "/inventaire")]:
+        assert getattr(client, methode)(url).status_code == 401, url
+        assert getattr(client, methode)(
+            url, headers={"X-Boutique-Jeton": "faux"}).status_code == 401, url
+
+
+def test_le_reseau_expose_le_rayon_de_la_boutique_proposante(reseau):
+    """Chaque boutique a son rayon : c'est celui du confrère qui propose qu'il faut lire, pas
+    le sien."""
+    client, entete_a, entete_b, _, _ = reseau
+    client.post("/stock/m1/entree?quantite=9", headers=entete_b)
+    client.post("/reseau/partage?montures=m1", headers=entete_b)
+
+    trouve = client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json()
+    assert len(trouve) == 1
+    assert trouve[0]["quantite"] == 10, "le stock de B, pas celui de A"
+
+
+def test_reseau_moi_identifie_la_boutique(reseau_vide):
+    """Se reconnecter depuis un autre téléphone : le code est vérifié par le serveur."""
+    client = reseau_vide
+    d = client.post("/reseau/inscription?nom=Optique Centre&ville=Lyon").json()
+    fiche = client.get("/reseau/moi", headers={"X-Boutique-Jeton": d["jeton"]}).json()
+    assert fiche["nom"] == "Optique Centre"
+    assert "jeton" not in fiche and "email" not in fiche
+
+
+def test_reseau_moi_refuse_un_code_inconnu(reseau_vide):
+    assert reseau_vide.get("/reseau/moi").status_code == 401
+    assert reseau_vide.get("/reseau/moi",
+                            headers={"X-Boutique-Jeton": "invente"}).status_code == 401

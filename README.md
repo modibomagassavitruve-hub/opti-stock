@@ -22,6 +22,10 @@ tant que le script tourne — elle couperait le tunnel au milieu d'une démonstr
 
 ## Utiliser
 
+**Créer sa boutique.** Premier écran : nom, ville, et c'est parti. L'application remet un
+code d'accès, à noter : c'est lui qui rend son stock depuis un autre téléphone. Chaque
+boutique a son propre rayon, ses propres fiches et ses propres inventaires.
+
 **Entrer une monture** (onglet Saisir). Photographier la monture, puis son étiquette : l'OCR
 remplit marque, référence, coloris et calibre. Compléter, et c'est en stock avec sa quantité
 et son emplacement.
@@ -125,19 +129,25 @@ successivement : l'auto-appariement (interroger avec une photo du catalogue), la
 l'entraînement (recall@1 de 0.77 avec, 0.26 sans), et le raccourci du décor (le modèle
 reconnaît l'endroit du présentoir, pas la monture). Détails dans `evaluer.py`.
 
-État actuel, sur 115 montures : **recall@5 = 0.861**, recall@1 = 0.739. Avec filtre par marque,
-sur les 83 requêtes dont la marque est connue : 0.867 contre 0.807 sans. L'API répond dans
-74 % des cas et a raison 91 % du temps. Le seuil de confiance est recalibré automatiquement à
-chaque entraînement — il dépend de la distribution des scores, et une constante écrite en dur
-s'est périmée quatre fois.
+État actuel, sur 115 montures : **recall@5 = 0.913**, recall@1 = 0.739, recall@10 = 0.948.
+Avec filtre par marque, sur les 83 requêtes dont la marque est connue : 0.867 contre 0.807
+sans. L'API répond dans 74 % des cas et a raison 91 % du temps. Le seuil de confiance est
+recalibré automatiquement à chaque entraînement — il dépend de la distribution des scores, et
+une constante écrite en dur s'est périmée quatre fois.
+
+**Le recall se compte en montures, pas en photos.** Le catalogue compte trois à cinq photos
+par monture ; l'API affiche k montures distinctes. Mesurer sur les k premières *photos*
+mesurait donc autre chose que ce que l'opticien voit — et donnait 0.861 au lieu de 0.913. Le
+modèle n'a pas changé : c'est la mesure qui s'est alignée sur le produit. Le recall@1, lui,
+est identique (0.739), la déduplication ne touchant que les places au-delà de la première.
 
 **Ne pas confondre avec le chiffre affiché en fin d'entraînement** (0.940). Celui-là vient de
 la validation interne, dont le découpage est plus favorable. Seul `evaluer.py` applique le
-protocole sans fuite, et c'est lui qui fait foi : l'écart entre les deux est de 8 points.
+protocole sans fuite, et c'est lui qui fait foi.
 
-**Renseigner 7 marques de plus n'a pas bougé le recall global** (0.861 avant comme après). Ce
-que ça change est ailleurs : 83 requêtes au lieu de 76 peuvent utiliser le filtre par marque,
-et 7 montures de plus sont proposables au réseau.
+**Renseigner 7 marques de plus n'a pas bougé le recall global.** Ce que ça change est
+ailleurs : 83 requêtes au lieu de 76 peuvent utiliser le filtre par marque, et 7 montures de
+plus sont proposables au réseau.
 
 ## Fichiers
 

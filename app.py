@@ -172,13 +172,25 @@ def charger_modeles(
 # ---------------------------------------------------------------- logique métier (testable sans les vrais modèles)
 def recherche_topk(embedding_requete: np.ndarray, emb_catalogue: np.ndarray,
                     labels_catalogue: np.ndarray, k: int = 5) -> list[dict]:
-    """Plus proches voisins par similarité cosinus (tout est déjà normalisé -> produit scalaire)."""
+    """Les k MONTURES les plus proches, par similarité cosinus (tout est normalisé -> produit
+    scalaire).
+
+    k montures, pas k photos. Le catalogue en compte trois à cinq par monture ; sans
+    déduplication, une requête renvoyait « 18, 18, 18, 18, 18, 11 » -- cinq vignettes
+    identiques, et une seule véritable alternative offerte à l'opticien. Chaque monture est
+    représentée par sa meilleure photo, ce qui est aussi le score qui l'a classée.
+    """
     if len(emb_catalogue) == 0:
         return []
-    k = min(k, len(emb_catalogue))
     sims = emb_catalogue @ embedding_requete
-    ordre = np.argsort(-sims)[:k]
-    return [{"monture": str(labels_catalogue[i]), "similarite": round(float(sims[i]), 4)} for i in ordre]
+    resultats: dict[str, float] = {}
+    for i in np.argsort(-sims):
+        label = str(labels_catalogue[i])
+        if label not in resultats:
+            resultats[label] = round(float(sims[i]), 4)
+            if len(resultats) == k:
+                break
+    return [{"monture": m, "similarite": s} for m, s in resultats.items()]
 
 
 def _masque_marque(modeles: Modeles, marque: str) -> np.ndarray | None:
@@ -284,15 +296,47 @@ CHARGEUR_MODELES: Callable[[], Modeles] = charger_modeles
 # chemin configurable, à faire pointer vers un volume monté.
 _DONNEES = Path(os.environ.get("OPTI_STOCK_JOURNAL", "data/journal"))
 JOURNAL = Journal(_DONNEES)
-INVENTAIRES = Inventaire(_DONNEES / "inventaires")
 # Le réseau porte des messages entre entreprises : il va dans le même volume persistant.
 RESEAU = Reseau(_DONNEES / "reseau.jsonl")
-# Le stock est la donnée métier de la boutique : sa perte coûterait plus cher que celle du
-# modèle, qui se reconstruit. Même volume persistant, pour la même raison.
-STOCK = Stock(_DONNEES / "stock.jsonl")
-# Montures saisies au comptoir, absentes du catalogue entraîné. Même volume persistant : ce
-# sont des données métier, et leurs photos nourriront un réentraînement plus tard.
-FICHES = Fiches(_DONNEES)
+
+# --- Cloisonnement par boutique -------------------------------------------
+# Stock, fiches et inventaires appartiennent à UNE boutique : un opticien qui s'inscrit doit
+# trouver son propre rayon, pas celui du confrère qui a essayé l'application avant lui.
+#
+# Le cloisonnement passe par un dossier distinct plutôt que par un champ « boutique » filtré à
+# la lecture. Un filtre oublié dans une requête laisse fuir les données du voisin sans que
+# rien ne le signale ; un chemin séparé rend la fuite structurellement impossible, et les
+# classes Stock, Fiches et Inventaire restent inchangées.
+#
+# Le journal des prédictions, lui, reste commun : il mesure le MODÈLE et non une boutique, et
+# le fragmenter par boutique retarderait d'autant la seule mesure de fiabilité réelle.
+_BOUTIQUES = _DONNEES / "boutiques"
+# Les photos de fiches sont hors des dossiers de boutique : une balise <img> ne peut pas
+# porter d'en-tête d'authentification. Elles sont donc adressées par leur seul identifiant,
+# tiré au hasard. Les fiches elles-mêmes restent cloisonnées.
+_PHOTOS_FICHES = _DONNEES / "photos_fiches"
+
+
+def _dossier(boutique: str) -> Path:
+    return _BOUTIQUES / boutique
+
+
+def stock_de(boutique: str) -> Stock:
+    return Stock(_dossier(boutique) / "stock.jsonl")
+
+
+def fiches_de(boutique: str) -> Fiches:
+    return Fiches(_dossier(boutique), photos=_PHOTOS_FICHES)
+
+
+def inventaires_de(boutique: str) -> Inventaire:
+    return Inventaire(_dossier(boutique) / "inventaires")
+
+
+def _fiche_globale(monture: str) -> Path | None:
+    """Photo d'une fiche, quelle que soit la boutique qui l'a saisie -- voir _PHOTOS_FICHES."""
+    chemin = _PHOTOS_FICHES / f"{monture}.jpg"
+    return chemin if chemin.is_file() else None
 
 
 @asynccontextmanager
@@ -389,7 +433,7 @@ def route_photo_monture(request: Request, label: str) -> FileResponse:
     # Monture saisie au comptoir : sa photo est rangée sous son identifiant, lui-même produit
     # par le serveur. Aucune valeur venue du client ne compose le chemin.
     if label.startswith("f_"):
-        if (photo := FICHES.photo(label)) is None:
+        if (photo := _fiche_globale(label)) is None:
             raise HTTPException(status_code=404, detail=f"Aucune photo pour {label}")
         return FileResponse(photo, media_type="image/jpeg")
 
@@ -414,18 +458,22 @@ def route_photo_monture(request: Request, label: str) -> FileResponse:
 
 
 @app.post("/inventaire")
-def route_inventaire_demarrer(request: Request, libelle: str = Query("", description="ex. 2026")) -> dict:
+def route_inventaire_demarrer(request: Request, libelle: str = Query("", description="ex. 2026"),
+                               x_boutique_jeton: str | None = Header(None)) -> dict:
     """Ouvre une session en figeant le stock théorique, pour qu'il puisse bouger pendant
     l'inventaire -- une vente, une réception -- sans fausser la comparaison finale."""
-    theorique = {m: e["quantite"] for m, e in STOCK.etat().items()}
-    session = INVENTAIRES.demarrer(theorique, libelle)
-    return INVENTAIRES.etat(session)
+    b = _boutique(x_boutique_jeton)
+    theorique = {m: e["quantite"] for m, e in stock_de(b).etat().items()}
+    inventaires = inventaires_de(b)
+    return inventaires.etat(inventaires.demarrer(theorique, libelle))
 
 
 @app.get("/inventaire")
-def route_inventaires(request: Request) -> list[dict]:
-    identites = _identite(request)
-    return [_nommer_ecarts(e, identites) for e in INVENTAIRES.sessions()]
+def route_inventaires(request: Request,
+                       x_boutique_jeton: str | None = Header(None)) -> list[dict]:
+    b = _boutique(x_boutique_jeton)
+    identites = _identite(request, b)
+    return [_nommer_ecarts(e, identites) for e in inventaires_de(b).sessions()]
 
 
 def _nommer_ecarts(etat: dict, identites: dict[str, dict]) -> dict:
@@ -441,9 +489,11 @@ def _nommer_ecarts(etat: dict, identites: dict[str, dict]) -> dict:
 
 
 @app.get("/inventaire/{session}")
-def route_inventaire_etat(request: Request, session: str) -> dict:
+def route_inventaire_etat(request: Request, session: str,
+                           x_boutique_jeton: str | None = Header(None)) -> dict:
+    b = _boutique(x_boutique_jeton)
     try:
-        return _nommer_ecarts(INVENTAIRES.etat(session), _identite(request))
+        return _nommer_ecarts(inventaires_de(b).etat(session), _identite(request, b))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
 
@@ -451,12 +501,14 @@ def route_inventaire_etat(request: Request, session: str) -> dict:
 @app.post("/inventaire/{session}/compter")
 def route_inventaire_compter(request: Request, session: str,
                               monture: str = Query(..., description="Monture pointée"),
-                              quantite: int = Query(1, ge=1, le=999)) -> dict:
+                              quantite: int = Query(1, ge=1, le=999),
+                              x_boutique_jeton: str | None = Header(None)) -> dict:
     """Pointe une monture comme présente en rayon. L'identification par photo passe par
     /identifier ; ici l'opticien confirme, c'est lui qui fait foi."""
+    b = _boutique(x_boutique_jeton)
     try:
-        return _nommer_ecarts(INVENTAIRES.compter(session, monture, quantite),
-                               _identite(request))
+        return _nommer_ecarts(inventaires_de(b).compter(session, monture, quantite),
+                               _identite(request, b))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
     except ValueError as e:
@@ -465,10 +517,12 @@ def route_inventaire_compter(request: Request, session: str,
 
 @app.post("/inventaire/{session}/annuler")
 def route_inventaire_annuler(request: Request, session: str, monture: str = Query(...),
-                              quantite: int = Query(1, ge=1, le=999)) -> dict:
+                              quantite: int = Query(1, ge=1, le=999),
+                              x_boutique_jeton: str | None = Header(None)) -> dict:
+    b = _boutique(x_boutique_jeton)
     try:
-        return _nommer_ecarts(INVENTAIRES.annuler_comptage(session, monture, quantite),
-                               _identite(request))
+        return _nommer_ecarts(inventaires_de(b).annuler_comptage(session, monture, quantite),
+                               _identite(request, b))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
 
@@ -479,10 +533,13 @@ def route_inventaire_cloturer(
     session: str,
     forcer: bool = Query(False, description="Clôturer même sans avoir rien compté, ce qui "
                                              "met tout le stock à zéro"),
+    x_boutique_jeton: str | None = Header(None),
 ) -> dict:
     """Clôt et applique les comptages au stock : le rayon fait foi."""
+    b = _boutique(x_boutique_jeton)
     try:
-        return _nommer_ecarts(INVENTAIRES.cloturer(session, STOCK, forcer), _identite(request))
+        return _nommer_ecarts(inventaires_de(b).cloturer(session, stock_de(b), forcer),
+                               _identite(request, b))
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
     except ValueError as e:
@@ -509,6 +566,7 @@ async def route_creer_monture(
     branche: str = Query("", max_length=20),
     quantite: int = Query(1, ge=0, le=999, description="0 pour créer la fiche sans stock"),
     emplacement: str = Query("", max_length=80),
+    x_boutique_jeton: str | None = Header(None),
 ) -> dict:
     """Crée la fiche d'une monture et l'entre en stock dans la foulée.
 
@@ -520,22 +578,26 @@ async def route_creer_monture(
     if donnees:
         _lire_image_uploadee(donnees)   # rejette tout de suite un fichier qui n'est pas une image
 
+    b = _boutique(x_boutique_jeton)
+    fiches = fiches_de(b)
     try:
-        fiche = FICHES.creer({"marque": marque, "reference": reference, "coloris": coloris,
+        fiche = fiches.creer({"marque": marque, "reference": reference, "coloris": coloris,
                                "calibre": calibre, "pont": pont, "branche": branche}, donnees)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     etat = {"monture": fiche["monture"], "quantite": 0, "emplacement": ""}
     if quantite:
-        etat = STOCK.entrer(fiche["monture"], quantite, emplacement, motif="reception")
-    return {"fiche": fiche, "libelle": FICHES.libelle(fiche["monture"]), "stock": etat}
+        etat = stock_de(b).entrer(fiche["monture"], quantite, emplacement, motif="reception")
+    return {"fiche": fiche, "libelle": fiches.libelle(fiche["monture"]), "stock": etat}
 
 
 @app.get("/monture")
-def route_fiches(q: str = Query("", max_length=80, description="Recherche libre")) -> list[dict]:
+def route_fiches(q: str = Query("", max_length=80, description="Recherche libre"),
+                  x_boutique_jeton: str | None = Header(None)) -> list[dict]:
     """Fiches saisies, avec leur quantité en rayon."""
-    etats = STOCK.etat()
+    b = _boutique(x_boutique_jeton)
+    FICHES, etats = fiches_de(b), stock_de(b).etat()
     return [{**f, "libelle": FICHES.libelle(f["monture"]),
              "quantite": etats.get(f["monture"], {}).get("quantite", 0),
              "emplacement": etats.get(f["monture"], {}).get("emplacement", "")}
@@ -547,11 +609,12 @@ def route_modifier_fiche(monture: str,
                           marque: str | None = Query(None, max_length=80),
                           reference: str | None = Query(None, max_length=80),
                           coloris: str | None = Query(None, max_length=40),
-                          calibre: str | None = Query(None, max_length=20)) -> dict:
+                          calibre: str | None = Query(None, max_length=20),
+                          x_boutique_jeton: str | None = Header(None)) -> dict:
     champs = {c: v for c, v in (("marque", marque), ("reference", reference),
                                  ("coloris", coloris), ("calibre", calibre)) if v is not None}
     try:
-        return FICHES.modifier(monture, champs)
+        return fiches_de(_boutique(x_boutique_jeton)).modifier(monture, champs)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Fiche {monture} inconnue")
 
@@ -561,7 +624,7 @@ def route_modifier_fiche(monture: str,
 # ---------------------------------------------------------------------------
 
 
-def _identite(request: Request) -> dict[str, dict]:
+def _identite(request: Request, boutique: str) -> dict[str, dict]:
     """Ce qu'il faut savoir d'une monture pour l'afficher : marque, référence, libellé.
 
     Rassemble les deux origines -- le catalogue entraîné et les fiches saisies au comptoir --
@@ -574,11 +637,11 @@ def _identite(request: Request) -> dict[str, dict]:
     if m.marques_catalogue is not None:
         marques = {str(l): str(mq).strip()
                    for l, mq in zip(m.labels_catalogue, m.marques_catalogue)}
-    fiches = FICHES.toutes()
+    fiches = fiches_de(boutique).toutes()
     references = _references_catalogue()
 
     identites: dict[str, dict] = {}
-    for monture in set(marques) | set(fiches) | set(STOCK.etat()):
+    for monture in set(marques) | set(fiches) | set(stock_de(boutique).etat()):
         fiche = fiches.get(monture, {})
         marque = fiche.get("marque") or marques.get(monture, "")
         reference = fiche.get("reference") or references.get(monture, "")
@@ -592,26 +655,29 @@ def _identite(request: Request) -> dict[str, dict]:
 
 
 @app.get("/stock")
-def route_stock(request: Request) -> dict:
-    """Le stock, nommé par ce qui est écrit sur les montures."""
-    identites = _identite(request)
+def route_stock(request: Request, x_boutique_jeton: str | None = Header(None)) -> dict:
+    """Le stock de CETTE boutique, nommé par ce qui est écrit sur les montures."""
+    b = _boutique(x_boutique_jeton)
+    stock, identites = stock_de(b), _identite(request, b)
     lignes = [{**e, **identites.get(monture, {"libelle": monture})}
-              for monture, e in sorted(STOCK.etat().items())]
-    return {"lignes": lignes, "bilan": STOCK.bilan()}
+              for monture, e in sorted(stock.etat().items())]
+    return {"lignes": lignes, "bilan": stock.bilan()}
 
 
 @app.get("/stock/{monture:path}")
-def route_stock_monture(monture: str) -> dict:
-    return {**STOCK.etat_monture(monture), "mouvements": STOCK.mouvements(monture)}
+def route_stock_monture(monture: str, x_boutique_jeton: str | None = Header(None)) -> dict:
+    stock = stock_de(_boutique(x_boutique_jeton))
+    return {**stock.etat_monture(monture), "mouvements": stock.mouvements(monture)}
 
 
 @app.post("/stock/{monture:path}/entree")
 def route_stock_entree(monture: str,
                         quantite: int = Query(1, ge=1, le=999),
                         emplacement: str = Query("", max_length=80),
-                        motif: str = Query("reception")) -> dict:
+                        motif: str = Query("reception"),
+                        x_boutique_jeton: str | None = Header(None)) -> dict:
     try:
-        return STOCK.entrer(monture, quantite, emplacement, motif)
+        return stock_de(_boutique(x_boutique_jeton)).entrer(monture, quantite, emplacement, motif)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -619,11 +685,12 @@ def route_stock_entree(monture: str,
 @app.post("/stock/{monture:path}/sortie")
 def route_stock_sortie(monture: str,
                         quantite: int = Query(1, ge=1, le=999),
-                        motif: str = Query("vente")) -> dict:
+                        motif: str = Query("vente"),
+                        x_boutique_jeton: str | None = Header(None)) -> dict:
     """Refuse de descendre sous zéro : un stock négatif n'existe pas en rayon, et l'accepter
     rendrait tous les chiffres douteux. Le correctif est /ajuster."""
     try:
-        return STOCK.sortir(monture, quantite, motif)
+        return stock_de(_boutique(x_boutique_jeton)).sortir(monture, quantite, motif)
     except ValueError as e:
         raise HTTPException(status_code=409, detail=str(e))
 
@@ -631,9 +698,10 @@ def route_stock_sortie(monture: str,
 @app.post("/stock/{monture:path}/ajuster")
 def route_stock_ajuster(monture: str,
                          quantite: int = Query(..., ge=0, le=999),
-                         motif: str = Query("correction")) -> dict:
+                         motif: str = Query("correction"),
+                         x_boutique_jeton: str | None = Header(None)) -> dict:
     try:
-        return STOCK.ajuster(monture, quantite, motif)
+        return stock_de(_boutique(x_boutique_jeton)).ajuster(monture, quantite, motif)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -734,7 +802,7 @@ def _boutique(jeton: str | None) -> str:
     return boutique
 
 
-def _catalogue_partageable(request: Request) -> list[dict]:
+def _catalogue_partageable(request: Request, boutique: str) -> list[dict]:
     """Les montures qu'on peut proposer au réseau : celles qui ont une marque ET qu'il reste en
     rayon.
 
@@ -747,7 +815,7 @@ def _catalogue_partageable(request: Request) -> list[dict]:
     marques_par_photo = (m.marques_catalogue if m.marques_catalogue is not None
                          else [""] * len(m.labels_catalogue))
 
-    en_rayon = STOCK.en_stock()
+    en_rayon = stock_de(boutique).en_stock()
 
     # Une monture par entrée, pas une par photo : le catalogue compte plusieurs vues de la même
     # monture, et la lister cinq fois rendrait le choix des montures à partager illisible.
@@ -758,6 +826,14 @@ def _catalogue_partageable(request: Request) -> list[dict]:
             montures[label] = {"libelle": label, "marque": str(marque).strip(),
                                 "reference": references.get(label, ""),
                                 "quantite": en_rayon[label]["quantite"]}
+
+    # Les montures saisies au comptoir sont proposables aussi : ce sont souvent les seules que
+    # la boutique possède vraiment, et elles portent déjà marque et référence.
+    for identifiant, fiche in fiches_de(boutique).toutes().items():
+        if fiche.get("marque") and identifiant in en_rayon:
+            montures[identifiant] = {"libelle": identifiant, "marque": fiche["marque"],
+                                      "reference": fiche.get("reference", ""),
+                                      "quantite": en_rayon[identifiant]["quantite"]}
     return sorted(montures.values(), key=lambda x: (x["marque"], x["libelle"]))
 
 
@@ -784,6 +860,13 @@ def route_inscription(
     return RESEAU.inscrire(nom.strip(), ville.strip(), email.strip())
 
 
+@app.get("/reseau/moi")
+def route_moi(x_boutique_jeton: str | None = Header(None)) -> dict:
+    """La boutique que désigne ce jeton, ou 401. Sert à se reconnecter depuis un autre
+    téléphone : on ne croit pas le code sur parole, c'est le serveur qui tranche."""
+    return RESEAU.boutiques()[_boutique(x_boutique_jeton)]
+
+
 @app.get("/reseau/boutiques")
 def route_boutiques() -> list[dict]:
     """Annuaire : nom et ville uniquement. Ni jeton ni e-mail."""
@@ -795,7 +878,7 @@ def route_mon_stock(request: Request,
                     x_boutique_jeton: str | None = Header(None)) -> dict:
     """Ce que cette boutique *peut* proposer au réseau, et ce qu'elle propose déjà."""
     boutique = _boutique(x_boutique_jeton)
-    partageables = _catalogue_partageable(request)
+    partageables = _catalogue_partageable(request, boutique)
     deja = {m.get("libelle") for m in RESEAU.partage(boutique)}
     return {"boutique": boutique,
             "montures": [{**m, "partagee": m["libelle"] in deja} for m in partageables]}
@@ -810,7 +893,7 @@ def route_partage(request: Request,
     reste du stock n'est jamais exposé."""
     boutique = _boutique(x_boutique_jeton)
     voulues = set(montures)
-    a_partager = [m for m in _catalogue_partageable(request) if m["libelle"] in voulues]
+    a_partager = [m for m in _catalogue_partageable(request, boutique) if m["libelle"] in voulues]
 
     inconnues = voulues - {m["libelle"] for m in a_partager}
     if inconnues:
@@ -834,10 +917,18 @@ def route_chercher(marque: str = Query("", description="Marque recherchée"),
     # La disponibilité se vérifie ICI, pas au moment du partage. Le partage est un choix
     # durable figé dans le journal ; le stock, lui, bouge. Filtrer seulement à l'inscription
     # laisserait proposer une monture vendue depuis -- le confrère se déplace pour rien.
-    en_rayon = STOCK.en_stock()
-    return [{**t, "quantite": en_rayon[t["libelle"]]["quantite"]}
-            for t in RESEAU.chercher(marque=marque, reference=reference, sauf_boutique=boutique)
-            if t.get("libelle") in en_rayon]
+    #
+    # Et c'est le rayon de CHAQUE boutique proposante qu'on interroge, pas celui du chercheur :
+    # chaque boutique a le sien depuis qu'elles sont cloisonnées.
+    rayons: dict[str, dict] = {}
+    trouves = []
+    for t in RESEAU.chercher(marque=marque, reference=reference, sauf_boutique=boutique):
+        proprietaire = t["boutique"]
+        if proprietaire not in rayons:
+            rayons[proprietaire] = stock_de(proprietaire).en_stock()
+        if t.get("libelle") in rayons[proprietaire]:
+            trouves.append({**t, "quantite": rayons[proprietaire][t["libelle"]]["quantite"]})
+    return trouves
 
 
 @app.post("/reseau/demande")

@@ -31,10 +31,14 @@ def _horodatage() -> str:
 
 
 class Fiches:
-    def __init__(self, dossier: Path):
+    def __init__(self, dossier: Path, photos: Path | None = None):
         self.dossier = Path(dossier)
         self.lignes = self.dossier / "fiches.jsonl"
-        self.photos = self.dossier / "photos_fiches"
+        # Les photos peuvent être rangées hors du dossier de la boutique. C'est ce que fait
+        # l'API : une balise <img> ne peut pas porter d'en-tête d'authentification, donc la
+        # photo est adressée par son seul identifiant, tiré au hasard et non énumérable.
+        # Les fiches elles-mêmes -- marque, référence, stock -- restent cloisonnées.
+        self.photos = Path(photos) if photos else self.dossier / "photos_fiches"
 
     def _lire(self) -> list[dict]:
         if not self.lignes.exists():

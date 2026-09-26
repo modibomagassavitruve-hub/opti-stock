@@ -166,6 +166,42 @@
   nav button[data-page=reseau].actif     { color: var(--c-reseau);     border-top-color: var(--c-reseau); }
   nav button[data-page=plus].actif       { color: var(--c-plus);       border-top-color: var(--c-plus); }
 
+  /* Loupe : au comptoir, on veut vérifier que c'est bien cette monture-là avant de la
+     décompter. La vignette de 48 px ne suffit pas à trancher entre deux écailles proches. */
+  dialog.loupe { border: none; padding: 0; background: transparent; max-width: 100vw;
+    max-height: 100vh; width: 100%; height: 100%; margin: 0; overflow: hidden; }
+  dialog.loupe::backdrop { background: rgba(0,0,0,.94); }
+  /* Fond opaque sur le contenu lui-même : le seul ::backdrop laisse transparaître la liste
+     derrière, et on ne distingue plus les branches de la monture du texte du dessous. */
+  dialog.loupe .contenu { height: 100%; background: #0a0a0c;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 16px; padding: 20px; }
+  dialog.loupe img { max-width: 100%; max-height: 66vh; border-radius: 12px;
+    object-fit: contain; background: #000; }
+  dialog.loupe .fiche-zoom { color: #fff; text-align: center; }
+  dialog.loupe .fiche-zoom .t { font-size: 1.25rem; font-weight: 800; }
+  dialog.loupe .fiche-zoom .d { font-size: .95rem; opacity: .75; margin-top: 4px; }
+  dialog.loupe .fermer { background: rgba(255,255,255,.14); color: #fff; border: none;
+    padding: 13px 28px; border-radius: 11px; font-weight: 700; font-size: 1rem; }
+
+  /* Accueil : couvre tout tant qu'aucune boutique n'est identifiée. C'est le premier écran
+     que voit un opticien sur un salon, et le seul moment où on peut le convertir. */
+  #accueil { position: fixed; inset: 0; z-index: 40; overflow: auto;
+    background: linear-gradient(160deg, var(--c-saisir), color-mix(in srgb, var(--c-saisir) 45%, #000));
+    display: grid; place-items: center; padding: 22px; }
+  #accueil[hidden] { display: none; }
+  .accueil-carte { background: var(--carte); border-radius: 18px; padding: 24px;
+    width: 100%; max-width: 420px; box-shadow: 0 18px 50px rgba(0,0,0,.3); }
+  .accueil-carte .marque { font-size: 1.8rem; font-weight: 800; letter-spacing: -.03em;
+    color: var(--c-saisir); }
+  .accueil-carte .pitch { color: var(--doux); font-size: .97rem; margin: 6px 0 22px; }
+  .accueil-carte .primaire { margin-top: 6px; }
+  button.lien { background: none; border: none; color: var(--doux); width: 100%;
+    margin-top: 12px; font-size: .9rem; text-decoration: underline; min-height: 40px; }
+  #codeTexte { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1rem;
+    color: #fff; background: rgba(255,255,255,.12); padding: 14px 16px; border-radius: 11px;
+    word-break: break-all; text-align: center; max-width: 92vw; user-select: all; }
+
   .vide { text-align: center; color: var(--doux); padding: 26px 16px; font-size: .9rem; }
   .vide b { display: block; font-size: 2rem; margin-bottom: 6px; opacity: .55; }
   .chargement { text-align: center; color: var(--doux); padding: 18px; font-size: .9rem; }
@@ -174,6 +210,55 @@
 </style>
 </head>
 <body>
+
+<!-- Écran d'accueil : tant qu'aucune boutique n'est identifiée, rien d'autre ne s'affiche.
+     Sur un salon, l'opticien scanne, crée sa boutique, et démarre sur SON rayon vide. -->
+<div id="accueil">
+  <div class="accueil-carte">
+    <div class="marque">Opti-Stock</div>
+    <p class="pitch">Votre stock de montures, depuis votre téléphone.<br>
+       Photographiez, l'étiquette fait le reste.</p>
+
+    <div id="formInscription">
+      <label class="champ"><span>Nom de votre boutique</span>
+        <input type="text" id="insNom" placeholder="Optique du Centre" autocomplete="organization"
+               oninput="el('btnInscrire').disabled = this.value.trim().length < 2"></label>
+      <label class="champ"><span>Ville</span>
+        <input type="text" id="insVille" placeholder="Lyon" autocomplete="address-level2"></label>
+      <label class="champ"><span>E-mail (facultatif)</span>
+        <input type="email" id="insEmail" placeholder="contact@…" autocomplete="email"></label>
+      <button class="primaire" id="btnInscrire" onclick="creerBoutique()" disabled>
+        Créer ma boutique</button>
+      <button class="lien" onclick="basculerAccueil('connexion')">J'ai déjà un code d'accès</button>
+      <button class="lien" id="btnRetour" hidden onclick="annulerAjout()">Retour</button>
+    </div>
+
+    <div id="formConnexion" hidden>
+      <label class="champ"><span>Votre code d'accès</span>
+        <input type="text" id="conCode" placeholder="collez votre code" autocomplete="off"
+               oninput="el('btnConnecter').disabled = !this.value.trim()"></label>
+      <button class="primaire" id="btnConnecter" onclick="seConnecter()" disabled>Entrer</button>
+      <button class="lien" onclick="basculerAccueil('inscription')">Créer une boutique</button>
+    </div>
+
+    <div id="sortieAccueil"></div>
+  </div>
+</div>
+
+<!-- Code d'accès, montré une fois après l'inscription : c'est la seule façon de retrouver sa
+     boutique depuis un autre téléphone. -->
+<dialog class="loupe" id="codeAcces">
+  <div class="contenu">
+    <div class="fiche-zoom">
+      <div class="t">Votre boutique est créée</div>
+      <div class="d" style="margin-top:12px">Notez ce code : il vous rendra votre stock depuis
+        n'importe quel téléphone. Il ne sera plus affiché.</div>
+    </div>
+    <div id="codeTexte"></div>
+    <button class="fermer" onclick="el('codeAcces').close(); onglet('saisir')">
+      C'est noté, commencer</button>
+  </div>
+</dialog>
 
 <header><div class="barre">
   <h1>Opti-Stock</h1>
@@ -272,22 +357,13 @@
   <p class="sous">Un client cherche une monture que vous n'avez plus ? Trouvez-la chez un
      confrère et écrivez-lui.</p>
 
-  <div class="carte" id="reseauInscription">
-    <label class="champ"><span>Nom de la boutique</span>
-      <input type="text" id="nomBoutique" placeholder="Optique du Centre"></label>
-    <label class="champ"><span>Ville</span>
-      <input type="text" id="villeBoutique" placeholder="Lyon"></label>
-    <button class="primaire" onclick="inscrire()">S'inscrire au réseau</button>
-    <p class="aide" style="margin-bottom:0">Démonstration : inscrivez deux boutiques pour voir
-       les deux côtés de l'échange.</p>
-  </div>
-
-  <div id="reseauConnecte" hidden>
+  <div id="reseauConnecte">
     <div class="carte">
       <label class="champ"><span>Vous êtes</span>
         <select id="boutiqueActive" onchange="changerBoutique()"></select></label>
-      <button class="petit" onclick="el('reseauInscription').hidden=false">
-        Inscrire une autre boutique</button>
+      <p class="aide">Changer de boutique change tout l'écran — stock compris : chacune a son
+         propre rayon. Pratique pour montrer les deux côtés d'un échange.</p>
+      <button class="petit" onclick="ajouterBoutique()">Ajouter une boutique sur ce téléphone</button>
     </div>
 
     <div class="carte">
@@ -331,6 +407,17 @@
   </div>
 </div>
 
+<dialog class="loupe" id="loupe" onclick="el('loupe').close()">
+  <div class="contenu">
+    <img id="loupeImg" alt="">
+    <div class="fiche-zoom">
+      <div class="t" id="loupeTitre"></div>
+      <div class="d" id="loupeDetail"></div>
+    </div>
+    <button class="fermer">Fermer</button>
+  </div>
+</dialog>
+
 <nav>
   <button class="actif" data-page="saisir"  onclick="onglet('saisir')"><span class="i">➕</span>Saisir</button>
   <button data-page="stock"      onclick="onglet('stock')"><span class="i">📦</span>Stock</button>
@@ -342,6 +429,22 @@
 <script>
 const el = (id) => document.getElementById(id);
 const api = () => el('api').value.trim().replace(/\/$/, '');
+
+/** Toute requête à l'API passe par ici : le jeton de la boutique y est ajouté une fois pour
+ *  toutes. Vingt-deux appels étaient dispersés dans ce fichier, chacun une occasion d'oublier
+ *  l'en-tête -- et l'oubli ne se voit qu'au moment où un opticien découvre un rayon vide.
+ *
+ *  Un 401 renvoie à l'accueil : le serveur ne reconnaît plus cette boutique (données
+ *  réinitialisées, jeton périmé), et continuer afficherait des écrans vides sans explication. */
+async function req(chemin, options = {}) {
+  const j = jeton();
+  const reponse = await fetch(api() + chemin, {
+    ...options,
+    headers: { ...(options.headers || {}), ...(j ? { 'X-Boutique-Jeton': j } : {}) },
+  });
+  if (reponse.status === 401 && j) { deconnecter(true); throw new Error('Session expirée'); }
+  return reponse;
+}
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
@@ -395,15 +498,18 @@ function onglet(nom) {
 
 async function connecter() {
   try {
-    const marques = (await fetch(api() + '/marques').then(r => r.json())).marques;
+    const marques = (await req('/marques').then(r => r.json())).marques;
     for (const id of ['marquesConnues', 'marqueReseau']) {
       const cible = el(id);
       cible.innerHTML = id === 'marqueReseau' ? '<option value="">—</option>' : '';
       marques.forEach(m => cible.appendChild(new Option(m, m)));
     }
-    el('etatApi').textContent = marques.length + ' marques connues';
+    // L'en-tête porte l'identité de la boutique, pas un compteur : c'est ce qu'un opticien
+    // doit voir pour savoir chez qui il saisit, surtout quand deux boutiques cohabitent
+    // sur le même téléphone pour la démonstration.
+    majIdentite();
   } catch (e) {
-    el('etatApi').innerHTML = '<span class="err">hors ligne</span>';
+    el('etatApi').innerHTML = '<span style="color:#ffd0d0">hors ligne</span>';
   }
 }
 
@@ -434,7 +540,7 @@ async function lireEtiquette() {
     const form = new FormData();
     // Plus de résolution que pour le reste : l'OCR lit une gravure de quelques millimètres.
     form.append('photo', await compresser(f, 2200, 0.9));
-    const d = await fetch(api() + '/lire-etiquette', { method: 'POST', body: form })
+    const d = await req('/lire-etiquette', { method: 'POST', body: form })
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 
     const remplis = [];
@@ -466,7 +572,7 @@ async function enregistrerMonture() {
   const photo = el('photoMonture').files[0];
   if (photo) form.append('photo', await compresser(photo));
   try {
-    const d = await fetch(api() + '/monture?' + params, { method: 'POST', body: form })
+    const d = await req('/monture?' + params, { method: 'POST', body: form })
       .then(async r => { if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
                           return r.json(); });
     el('sortieSaisie').innerHTML = `<div class="bandeau ok"><strong>${esc(d.libelle)}</strong>
@@ -503,7 +609,7 @@ async function identifier() {
   try {
     const form = new FormData();
     form.append('photo', await compresser(f));
-    derniereReponse = await fetch(api() + '/identifier?k=6', { method: 'POST', body: form })
+    derniereReponse = await req('/identifier?k=6', { method: 'POST', body: form })
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 
     const r = derniereReponse.resultats || [];
@@ -533,12 +639,12 @@ async function validerIdent(carte, monture) {
   if (!derniereReponse?.journal_id) return;
   document.querySelectorAll('.vignette').forEach(v => v.classList.remove('choisie'));
   carte.classList.add('choisie');
-  await fetch(api() + '/journal/' + derniereReponse.journal_id + '/choix?monture=' +
+  await req('/journal/' + derniereReponse.journal_id + '/choix?monture=' +
               encodeURIComponent(monture), { method: 'POST' });
 
   let note = '';
   if (inventaireEnCours) {
-    const r = await fetch(api() + '/inventaire/' + inventaireEnCours + '/compter?monture=' +
+    const r = await req('/inventaire/' + inventaireEnCours + '/compter?monture=' +
                           encodeURIComponent(monture), { method: 'POST' });
     if (r.ok) note = ' et comptée dans l\'inventaire';
   }
@@ -550,7 +656,7 @@ async function validerIdent(carte, monture) {
 // ------------------------------------------------------------------- stock
 async function chargerStock() {
   try {
-    const d = await fetch(api() + '/stock').then(r => r.json());
+    const d = await req('/stock').then(r => r.json());
     stockCache = d.lignes;
     el('resumeStock').textContent =
       `${d.bilan.pieces} pièces · ${d.bilan.references_en_stock} références` +
@@ -568,9 +674,11 @@ function afficherStock() {
 
   el('listeStock').innerHTML = lignes.length ? lignes.map(l => `
     <div class="ligne">
-      <img src="${api()}/monture/${encodeURIComponent(l.monture)}/photo" alt="" loading="lazy"
-           onerror="this.style.visibility='hidden'">
-      <div class="txt">
+      <img src="${api()}/monture/${encodeURIComponent(l.monture)}/photo" alt=""
+           loading="lazy" style="cursor:zoom-in"
+           onclick="agrandir('${esc(l.monture)}')"
+           onerror="this.dataset.sansPhoto='1';this.style.visibility='hidden'">
+      <div class="txt" style="cursor:zoom-in" onclick="agrandir('${esc(l.monture)}')">
         <div class="nom">${esc(l.libelle || l.monture)}</div>
         <div class="meta">${esc(l.emplacement || 'sans emplacement')}</div>
       </div>
@@ -583,14 +691,31 @@ function afficherStock() {
         : 'Rien en stock. Commencez par l\'onglet Saisir.'}</div>`;
 }
 
+/** Photo en grand, avec ce qu'il faut pour trancher : le nom, l'emplacement et ce qu'il en
+ *  reste. C'est la question qu'on se pose en tenant la monture : « c'est bien celle-là ? ». */
+function agrandir(monture) {
+  const l = stockCache.find(x => x.monture === monture);
+  if (!l) return;
+  const img = el('loupeImg');
+  img.src = `${api()}/monture/${encodeURIComponent(monture)}/photo`;
+  img.hidden = false;
+  // Une monture saisie sans photo ne doit pas ouvrir un cadre noir vide : on garde la fiche.
+  img.onerror = () => { img.hidden = true; };
+
+  el('loupeTitre').textContent = l.libelle || monture;
+  el('loupeDetail').textContent =
+    `${l.quantite} en rayon · ${l.emplacement || 'sans emplacement'}`;
+  el('loupe').showModal();
+}
+
 async function entrerStock(monture, n) {
-  const r = await fetch(`${api()}/stock/${encodeURIComponent(monture)}/entree?quantite=${n}`,
+  const r = await req(`/stock/${encodeURIComponent(monture)}/entree?quantite=${n}`,
                         { method: 'POST' });
   if (r.ok) await chargerStock();
 }
 
 async function sortirStock(monture) {
-  const r = await fetch(`${api()}/stock/${encodeURIComponent(monture)}/sortie?quantite=1&motif=vente`,
+  const r = await req(`/stock/${encodeURIComponent(monture)}/sortie?quantite=1&motif=vente`,
                         { method: 'POST' });
   if (!r.ok) { alert((await r.json()).detail || 'Impossible'); return; }
   await chargerStock();
@@ -601,7 +726,7 @@ let inventaireEnCours = null;
 
 async function demarrerInventaire() {
   try {
-    const d = await fetch(api() + '/inventaire?libelle=' +
+    const d = await req('/inventaire?libelle=' +
       encodeURIComponent(el('libelleInv').value || ''), { method: 'POST' }).then(r => r.json());
     inventaireEnCours = d.session;
     await rafraichirInventaire();
@@ -611,7 +736,7 @@ async function demarrerInventaire() {
 }
 
 async function listerInventaires() {
-  const s = await fetch(api() + '/inventaire').then(r => r.json());
+  const s = await req('/inventaire').then(r => r.json());
   el('sortieInventaire').innerHTML = s.length
     ? '<div class="carte">' + s.map(x => `
         <div class="ligne"><div class="txt">
@@ -632,7 +757,7 @@ function ligneEcart(l) {
 
 async function rafraichirInventaire() {
   if (!inventaireEnCours) return;
-  const e = await fetch(api() + '/inventaire/' + inventaireEnCours).then(r => r.json());
+  const e = await req('/inventaire/' + inventaireEnCours).then(r => r.json());
   const juste = !e.manquantes.length && !e.en_trop.length;
 
   el('sortieInventaire').innerHTML = `
@@ -655,7 +780,7 @@ async function rafraichirInventaire() {
 
 async function cloturerInventaire() {
   if (!confirm('Clôturer applique les quantités comptées au stock. Continuer ?')) return;
-  const r = await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
+  const r = await req('/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
   if (!r.ok) {
     const motif = (await r.json()).detail || 'Impossible';
     // Le serveur refuse une clôture à vide, qui mettrait tout le stock à zéro. On relaie son
@@ -677,7 +802,7 @@ async function cloturerInventaire() {
 
 async function cloturerAVide() {
   if (!confirm('Cela mettra TOUT votre stock à zéro. En êtes-vous certain ?')) return;
-  await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer?forcer=true',
+  await req('/inventaire/' + inventaireEnCours + '/cloturer?forcer=true',
               { method: 'POST' });
   await rafraichirInventaire();
   stockCache = [];
@@ -707,8 +832,8 @@ function alerteSeuil(s) {
 async function bilan() {
   try {
     const [d, s] = await Promise.all([
-      fetch(api() + '/journal/bilan').then(r => r.json()),
-      fetch(api() + '/journal/seuil').then(r => r.json()).catch(() => null),
+      req('/journal/bilan').then(r => r.json()),
+      req('/journal/seuil').then(r => r.json()).catch(() => null),
     ]);
     if (!d.validees) {
       el('sortieBilan').innerHTML = `<p class="aide" style="margin-top:12px">${d.predictions || 0}
@@ -731,56 +856,140 @@ async function bilan() {
 // ------------------------------------------------------- réseau entre opticiens
 // Les jetons sont gardés dans ce navigateur pour permettre la bascule entre boutiques pendant
 // la démonstration. Commode à montrer, insuffisant en vrai : voir l'en-tête de reseau.py.
+/* ------------------------------------------------------------------ identité
+   Une boutique active à la fois, pour TOUTE l'application : stock, fiches et inventaires lui
+   appartiennent. `boutiques` garde celles créées depuis ce téléphone, ce qui permet de
+   montrer les deux côtés d'un échange réseau en basculant de l'une à l'autre -- et basculer
+   change alors le rayon affiché, puisque chacune a le sien.
+
+   Le jeton tient lieu de mot de passe et vit en localStorage : commode à démontrer,
+   insuffisant pour un service ouvert. Voir l'avertissement en tête de reseau.py. */
 let boutiques = JSON.parse(localStorage.getItem('opti_boutiques') || '[]');
+let activeId = localStorage.getItem('opti_active') || (boutiques[0] || {}).boutique || '';
 let conversationOuverte = null;
 
-const active = () => boutiques.find(b => b.boutique === el('boutiqueActive').value) || boutiques[0];
-const entete = () => ({ 'X-Boutique-Jeton': active().jeton });
+const active = () => boutiques.find(b => b.boutique === activeId) || boutiques[0] || null;
+const jeton = () => (active() || {}).jeton || '';
 
-async function inscrire() {
-  const nom = el('nomBoutique').value.trim();
-  if (nom.length < 2) { alert('Indiquez le nom de la boutique.'); return; }
-  try {
-    const d = await fetch(api() + '/reseau/inscription?' + new URLSearchParams(
-      { nom, ville: el('villeBoutique').value.trim() }), { method: 'POST' })
-      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
-    boutiques.push(d);
-    localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
-    el('nomBoutique').value = el('villeBoutique').value = '';
-    majBoutiques(d.boutique);
-  } catch (e) { alert('Inscription impossible : ' + e.message); }
-}
-
-function majBoutiques(choisie) {
-  const s = el('boutiqueActive');
-  s.innerHTML = '';
-  boutiques.forEach(b => s.add(new Option(b.nom + (b.ville ? ' — ' + b.ville : ''), b.boutique)));
-  if (choisie) s.value = choisie;
-  el('reseauConnecte').hidden = boutiques.length === 0;
-  el('reseauInscription').hidden = boutiques.length > 0;
-  if (boutiques.length) changerBoutique();
-}
-
-/** Un jeton peut ne plus rien valoir côté serveur -- données réinitialisées. Sans ce filet,
- *  toutes les requêtes répondraient 401 et l'interface resterait muette. */
-function jetonPerime() {
-  const perdue = active();
-  boutiques = boutiques.filter(b => b.boutique !== perdue.boutique);
+function memoriser() {
   localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
-  majBoutiques();
-  alert(`« ${perdue.nom} » n'est plus reconnue par le serveur. Inscrivez-la à nouveau.`);
+  localStorage.setItem('opti_active', activeId);
+}
+
+function basculerAccueil(vers) {
+  el('formInscription').hidden = vers !== 'inscription';
+  el('formConnexion').hidden = vers !== 'connexion';
+  el('sortieAccueil').innerHTML = '';
+}
+
+/** Affiche l'accueil ou l'application selon qu'une boutique est identifiée. */
+function majIdentite() {
+  const b = active();
+  el('accueil').hidden = !!b;
+  document.body.style.overflow = b ? '' : 'hidden';
+  el('btnRetour').hidden = !boutiques.length;
+  if (!b) return;
+  el('etatApi').textContent = b.nom;
+  const s = el('boutiqueActive');
+  if (s) {
+    s.innerHTML = '';
+    boutiques.forEach(x => s.add(new Option(x.nom + (x.ville ? ' — ' + x.ville : ''), x.boutique)));
+    s.value = activeId;
+  }
+}
+
+async function creerBoutique() {
+  const nom = el('insNom').value.trim();
+  if (nom.length < 2) return;
+  const bouton = el('btnInscrire');
+  bouton.disabled = true; bouton.textContent = 'Création…';
+  try {
+    const d = await req('/reseau/inscription?' + new URLSearchParams({
+      nom, ville: el('insVille').value.trim(), email: el('insEmail').value.trim(),
+    }), { method: 'POST' }).then(async r => {
+      if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
+      return r.json();
+    });
+    boutiques.push(d); activeId = d.boutique; memoriser();
+    ['insNom', 'insVille', 'insEmail'].forEach(c => el(c).value = '');
+    majIdentite();
+    await connecter();
+    // Le code n'est montré qu'ici : c'est la seule façon de retrouver sa boutique ailleurs.
+    el('codeTexte').textContent = d.jeton;
+    el('codeAcces').showModal();
+  } catch (e) {
+    el('sortieAccueil').innerHTML = `<p class="err">Création impossible : ${esc(e.message)}</p>`;
+  } finally {
+    bouton.disabled = false; bouton.textContent = 'Créer ma boutique';
+  }
+}
+
+/** Connexion par code : on ne croit pas le code sur parole, on demande au serveur. */
+async function seConnecter() {
+  const code = el('conCode').value.trim();
+  const bouton = el('btnConnecter');
+  bouton.disabled = true; bouton.textContent = 'Vérification…';
+  try {
+    const r = await fetch(api() + '/reseau/moi', { headers: { 'X-Boutique-Jeton': code } });
+    if (!r.ok) throw new Error('Code inconnu');
+    const b = { ...(await r.json()), jeton: code };
+    boutiques = boutiques.filter(x => x.boutique !== b.boutique).concat([b]);
+    activeId = b.boutique; memoriser();
+    el('conCode').value = '';
+    majIdentite();
+    await connecter();
+    onglet('stock');
+  } catch (e) {
+    el('sortieAccueil').innerHTML = `<p class="err">${esc(e.message)}</p>`;
+  } finally {
+    bouton.disabled = false; bouton.textContent = 'Entrer';
+  }
+}
+
+/** Retour à l'accueil. `perime` distingue le jeton que le serveur ne reconnaît plus -- données
+ *  réinitialisées -- d'une déconnexion volontaire : dans le premier cas il faut le dire, sinon
+ *  l'opticien croit avoir perdu son stock. */
+function deconnecter(perime = false) {
+  const perdue = active();
+  if (perime && perdue) {
+    boutiques = boutiques.filter(b => b.boutique !== perdue.boutique);
+    alert(`« ${perdue.nom} » n'est plus reconnue par le serveur. Recréez-la ou entrez votre code.`);
+  }
+  activeId = '';
+  memoriser();
+  stockCache = [];
+  majIdentite();
+}
+
+/** Revenir à l'accueil pour créer une seconde boutique, sans perdre la première : c'est ainsi
+ *  qu'on montre les deux côtés d'un échange réseau sur un seul téléphone. */
+function ajouterBoutique() {
+  activeId = '';
+  stockCache = [];
+  majIdentite();
+  basculerAccueil('inscription');
+}
+
+function annulerAjout() {
+  if (!boutiques.length) return;
+  activeId = boutiques[boutiques.length - 1].boutique;
+  memoriser();
+  majIdentite();
 }
 
 async function changerBoutique() {
+  activeId = el('boutiqueActive').value;
+  memoriser();
+  majIdentite();
   conversationOuverte = null;
+  stockCache = [];
   el('sortieReseau').innerHTML = '';
   await Promise.all([monStock(), mesEchanges()]);
 }
 
 async function monStock() {
   try {
-    const r = await fetch(api() + '/reseau/mon-stock', { headers: entete() });
-    if (r.status === 401) { jetonPerime(); return; }
+    const r = await req('/reseau/mon-stock');
     const d = await r.json();
     const deja = new Set(d.montures.filter(m => m.partagee).map(m => m.libelle));
     el('monStock').innerHTML = d.montures.length ? `
@@ -800,7 +1009,7 @@ async function monStock() {
 async function enregistrerPartage() {
   const p = new URLSearchParams();
   document.querySelectorAll('.aPartager:checked').forEach(c => p.append('montures', c.value));
-  const r = await fetch(api() + '/reseau/partage?' + p, { method: 'POST', headers: entete() });
+  const r = await req('/reseau/partage?' + p, { method: 'POST' });
   el('etatPartage').textContent = r.ok
     ? (await r.json()).partagees + ' monture(s) proposée(s)' : 'échec';
 }
@@ -813,7 +1022,7 @@ async function chercherReseau(marque) {
     el('sortieReseau').innerHTML = '<p class="err">Choisissez au moins une marque.</p>'; return;
   }
   try {
-    const t = await fetch(api() + '/reseau/chercher?' + p, { headers: entete() })
+    const t = await req('/reseau/chercher?' + p)
       .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
     el('sortieReseau').innerHTML = t.length ? t.map(x => `
       <div class="bandeau ok"><strong>${esc(x.marque)} ${esc(x.reference || '')}</strong>
@@ -839,7 +1048,7 @@ async function envoyerDemande(boutique, monture) {
   const p = new URLSearchParams({ boutique_sollicitee: boutique, monture,
                                    texte: el('texteDemande').value });
   try {
-    const d = await fetch(api() + '/reseau/demande?' + p, { method: 'POST', headers: entete() })
+    const d = await req('/reseau/demande?' + p, { method: 'POST' })
       .then(async r => { if (!r.ok) throw new Error((await r.json()).detail || r.status);
                           return r.json(); });
     conversationOuverte = d.conversation;
@@ -850,8 +1059,7 @@ async function envoyerDemande(boutique, monture) {
 
 async function mesEchanges() {
   try {
-    const r = await fetch(api() + '/reseau/conversations', { headers: entete() });
-    if (r.status === 401) { jetonPerime(); return; }
+    const r = await req('/reseau/conversations');
     const fils = await r.json();
     el('sortieMessages').innerHTML = (fils.length ? fils.map(f => `
       <div class="ligne"><div class="txt">
@@ -866,7 +1074,7 @@ async function mesEchanges() {
 async function ouvrirConversation(c) {
   conversationOuverte = c;
   try {
-    const d = await fetch(api() + '/reseau/conversation/' + c, { headers: entete() })
+    const d = await req('/reseau/conversation/' + c)
       .then(r => r.json());
     el('filOuvert').innerHTML = `<div style="border-top:1px solid var(--trait);margin-top:10px;padding-top:10px">
       ${d.messages.map(m => `<p style="margin:5px 0;font-size:.9rem">
@@ -882,14 +1090,14 @@ async function ouvrirConversation(c) {
 async function repondre() {
   const t = el('reponse').value.trim();
   if (!t) return;
-  const r = await fetch(api() + '/reseau/conversation/' + conversationOuverte +
-    '/message?texte=' + encodeURIComponent(t), { method: 'POST', headers: entete() });
+  const r = await req('/reseau/conversation/' + conversationOuverte +
+    '/message?texte=' + encodeURIComponent(t), { method: 'POST' });
   if (!r.ok) { alert((await r.json()).detail || 'Impossible'); return; }
   await mesEchanges();
 }
 
-connecter();
-majBoutiques();
+majIdentite();
+if (active()) connecter();
 </script>
 </body>
 </html>

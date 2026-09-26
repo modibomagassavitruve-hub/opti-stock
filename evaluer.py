@@ -75,15 +75,34 @@ def entrainer_sans_les_requetes(emb, labels, catalogue, dim_sortie=128, pas=1500
     return tete
 
 
+def k_premieres_montures(yc, ordre_ligne, k) -> list:
+    """Les k premières MONTURES distinctes d'un classement de photos.
+
+    Le catalogue compte trois à cinq photos par monture. Mesurer le recall sur les k premières
+    PHOTOS mesurerait autre chose que ce que l'API montre : elle affiche k montures distinctes
+    (voir recherche_topk dans app.py). Sans cette déduplication ici, mesure et service
+    divergeraient en silence -- précisément le genre d'écart qui a déjà coûté cher à ce projet.
+    """
+    vues: list = []
+    for i in ordre_ligne:
+        if yc[i] not in vues:
+            vues.append(yc[i])
+            if len(vues) == k:
+                break
+    return vues
+
+
 def mesurer(e, labels, ts, requete, catalogue, ks=(1, 5, 10)) -> dict:
     S = e[requete] @ e[catalogue].T
     yq, yc = labels[requete], labels[catalogue]
     ordre = np.argsort(-S, axis=1)
-    res = {f"recall@{k}": float(np.mean([yq[i] in yc[ordre[i, :k]] for i in range(len(yq))]))
+    res = {f"recall@{k}": float(np.mean([yq[i] in k_premieres_montures(yc, ordre[i], k)
+                                          for i in range(len(yq))]))
            for k in ks}
     res["similarite_top1"] = np.take_along_axis(S, ordre[:, :1], axis=1).ravel()
     res["juste_top1"] = np.array([yc[ordre[i, 0]] == yq[i] for i in range(len(yq))])
-    res["juste_top5"] = np.array([yq[i] in yc[ordre[i, :5]] for i in range(len(yq))])
+    res["juste_top5"] = np.array([yq[i] in k_premieres_montures(yc, ordre[i], 5)
+                                   for i in range(len(yq))])
 
     # marge honnête : montures différentes photographiées dans la même minute = même décor
     plein = e @ e.T
