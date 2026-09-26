@@ -683,3 +683,38 @@ def test_la_disponibilite_est_verifiee_a_la_recherche_pas_au_partage(reseau):
     client.post("/stock/m1/entree?quantite=2")
     trouve = client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json()
     assert len(trouve) == 1 and trouve[0]["quantite"] == 2
+
+
+# ------------------------------------------------- boucle d'apprentissage
+def test_route_seuil_est_en_lecture_seule(client, tmp_path, monkeypatch):
+    """Recalibrer modifie ce que l'API affirme : ça passe par la ligne de commande, jamais par
+    une requête web."""
+    from journal import Journal
+    monkeypatch.setattr(app_module, "JOURNAL", Journal(tmp_path / "journal"))
+    avant = client.get("/journal/seuil").json()
+    assert avant["validations"] == 0 and avant["assez"] is False
+    assert client.post("/journal/seuil").status_code == 405
+
+
+def test_route_seuil_mesure_le_seuil_en_service(client, tmp_path, monkeypatch):
+    import json as _json
+
+    from journal import Journal
+    journal = Journal(tmp_path / "journal")
+    monkeypatch.setattr(app_module, "JOURNAL", journal)
+    tete = tmp_path / "tete.json"
+    tete.write_text(_json.dumps({"seuil_confiance": 0.5}), encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "data").mkdir()
+    (tmp_path / "data" / "tete.json").write_text(_json.dumps({"seuil_confiance": 0.5}),
+                                                  encoding="utf-8")
+
+    for monture, choix in (("a", "a"), ("b", "aucune")):
+        ident = journal.enregistrer(
+            type_prediction="similarite", version="t",
+            resultat={"resultats": [{"monture": monture, "similarite": 0.9}], "fiable": True})
+        journal.noter_choix(ident, choix)
+
+    d = client.get("/journal/seuil").json()
+    assert d["validations"] == 2
+    assert d["reel_au_seuil_actuel"]["precision"] == 0.5

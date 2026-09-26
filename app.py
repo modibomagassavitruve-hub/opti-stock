@@ -521,6 +521,19 @@ def route_bilan() -> dict:
     return JOURNAL.bilan()
 
 
+@app.get("/journal/seuil")
+def route_seuil() -> dict:
+    """Le seuil en service tient-il face à l'usage réel ?
+
+    Lecture seule : recalibrer modifie ce que l'API affirme, et cela passe par
+    `python apprendre.py --appliquer-seuil`, jamais par une requête web. La route sert à
+    alerter -- un seuil calibré sur des photos d'une seule séance est probablement trop
+    permissif en boutique, et c'est invisible sans cette comparaison.
+    """
+    from apprendre import seuil_reel
+    return seuil_reel(JOURNAL, Path("data/tete.json"))
+
+
 @app.post("/lire-etiquette")
 async def route_lire_etiquette(
     request: Request,

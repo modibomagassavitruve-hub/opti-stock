@@ -25,6 +25,22 @@ les comptages au stock — le rayon fait foi, et chaque correction garde sa trac
 dans vos conditions réelles ; tous les autres chiffres de ce document viennent de photos
 prises en une seule séance, et sont donc optimistes.
 
+**Et le journal revient au modèle.** À partir de 30 validations :
+
+```bash
+python apprendre.py                      # ce que l'usage réel dit du seuil
+python apprendre.py --appliquer-seuil    # recalibrer sur ces données
+python apprendre.py --verser-photos      # puis python mettre_a_jour.py
+```
+
+C'est la seule chose qui puisse encore faire progresser le modèle. Le danger qu'elle corrige :
+le seuil livré est calibré sur des photos d'une seule séance, donc probablement **trop
+permissif** en boutique — l'appli afficherait « correspondance nette » sur des cas où elle a
+tort, et vous commanderiez la mauvaise référence. Essai sur usage simulé : le seuil livré
+répondait 100 % du temps pour 68 % de justesse ; recalibré, 75 % du temps pour 91 %.
+La section « Fiabilité constatée » de l'interface affiche l'alerte ; appliquer reste une
+commande, jamais une requête web.
+
 **Réseau.** Un client demande une monture que vous n'avez plus : cherchez-la chez un confrère
 inscrit et écrivez-lui directement. Vous choisissez monture par monture ce que vous exposez ;
 le reste de votre stock n'est jamais visible. Ce qui circule est la marque et la référence,
@@ -117,6 +133,7 @@ et 7 montures de plus sont proposables au réseau.
 | `mettre_a_jour.py` | enchaîne les deux, dans l'ordre |
 | `evaluer.py` | mesure sans fuite |
 | `journal.py` | collecte des identifications validées |
+| `apprendre.py` | ce que l'usage réel rend au modèle : seuil, photos |
 | `stock.py` | quantités et emplacements, par mouvements |
 | `inventaire.py` | sessions d'inventaire et écarts |
 | `reseau.py` | réseau entre opticiens : partage, recherche, messagerie |

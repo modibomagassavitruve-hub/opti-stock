@@ -431,9 +431,42 @@ async function cloturerInventaire() {
   await chargerStock();
 }
 
+/** Le seuil livré a été calibré sur des photos d'une seule séance. En boutique il est
+ *  probablement trop permissif, et ça ne se voit pas sans cette comparaison : l'appli
+ *  continuerait d'afficher « correspondance nette » sur des cas où elle a tort. */
+function alerteSeuil(s) {
+  const reel = s.reel_au_seuil_actuel;
+  if (!reel || reel.precision === null || !s.validations) return '';
+
+  const justesse = (reel.precision * 100).toFixed(0);
+  const mesure = `<p class="aide">Seuil en service ${s.seuil_actuel.toFixed(3)} :
+     sur votre usage, l'appli répond ${(reel.couverture * 100).toFixed(0)} % du temps
+     et a raison <strong>${justesse} %</strong> (${reel.repondus} cas).</p>`;
+
+  if (!s.assez) return mesure + `<p class="aide">Encore ${s.minimum - s.validations} validation(s)
+     avant de pouvoir recalibrer : en dessous, le nouveau seuil viendrait du bruit.</p>`;
+
+  if (s.seuil_propose && s.atteignable && Math.abs(s.seuil_propose - s.seuil_actuel) >= 0.005) {
+    const p = s.reel_au_seuil_propose;
+    return mesure + `<div class="bandeau doute">Le seuil mérite d'être recalibré :
+      <strong>${s.seuil_propose.toFixed(3)}</strong> donnerait
+      ${(p.precision * 100).toFixed(0)} % de justesse sur ${(p.couverture * 100).toFixed(0)} %
+      des cas. Lancer <code>python apprendre.py --appliquer-seuil</code>.</div>`;
+  }
+  if (s.atteignable === false) {
+    return mesure + `<div class="bandeau doute">Aucun seuil n'atteint la justesse visée sur
+      votre usage : l'appli ne devrait jamais se déclarer sûre. Mieux vaut ne rien affirmer
+      que d'affirmer sur du bruit.</div>`;
+  }
+  return mesure + `<p class="aide">Le seuil en service est le bon.</p>`;
+}
+
 async function bilan() {
   try {
-    const d = await fetch(api() + '/journal/bilan').then(r => r.json());
+    const [d, s] = await Promise.all([
+      fetch(api() + '/journal/bilan').then(r => r.json()),
+      fetch(api() + '/journal/seuil').then(r => r.json()).catch(() => null),
+    ]);
     if (!d.validees) {
       el('sortieBilan').innerHTML = `<p class="aide">${d.predictions || 0} identification(s),
         aucune validée pour l'instant. Aucun chiffre ne peut être annoncé sans vos validations.</p>`;
@@ -446,7 +479,7 @@ async function bilan() {
       ${d.precision_si_fiable !== null ? `<tr><td>Justesse quand l'appli est sûre</td>
         <td><strong>${(d.precision_si_fiable * 100).toFixed(0)} %</strong>
         sur ${d.marquees_fiables} cas</td></tr>` : ''}
-    </table>`;
+    </table>` + (s ? alerteSeuil(s) : '');
   } catch (e) {
     el('sortieBilan').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
   }
