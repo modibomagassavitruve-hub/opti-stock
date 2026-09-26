@@ -1,22 +1,14 @@
 # Données : volumineuses et régénérables depuis les photos + les scripts.
 data/*
 
-# Seul CSV versionné : il est saisi à la main, monture par monture, et rien ne le régénère.
-# Les autres étaient soit des sorties de scripts, soit -- pour catalogue_octika.csv et
-# catalogue_optique_sergent.csv -- des relevés de sites commerciaux tiers. Les conserver en
-# local pour de la recherche est une chose, les redistribuer sur un dépôt public en est une
-# autre : le droit des bases de données couvre les extractions substantielles. Ils n'ont de
-# toute façon jamais servi (zéro correspondance avec le stock) et aucun code ne les lit.
-!data/montures.csv
-
-# Le modèle servi : 2,7 Mo au total, et un serveur déployé n'a ni les 905 Mo de photos
-# sources ni le temps de les réencoder. Ces trois-là partent donc avec le code.
-# Ils sont indissociables : reconstruire l'un sans l'autre dégrade les résultats en silence.
-!data/catalogue.npz
-!data/tete.pt
-!data/tete.json
-!data/vignettes/
-!data/vignettes/*.jpg
+# RIEN de data/ n'est versionné, volontairement. Ce dossier contient l'inventaire réel d'une
+# boutique, les photos de ses montures et le modèle entraîné dessus : des données d'entreprise,
+# pas du code. Le dépôt porte de quoi tout reconstruire à partir de SES propres photos --
+# voir « Ajouter des montures » dans le README.
+#
+# Y figuraient aussi deux relevés de sites commerciaux tiers (24 629 références). Les garder
+# en local pour de la recherche est une chose, les redistribuer en est une autre : le droit
+# des bases de données couvre les extractions substantielles.
 
 __pycache__/
 *.pyc
