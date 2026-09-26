@@ -20,11 +20,19 @@ JOURNAL_CF="$(mktemp -t cloudflared)"
 nettoyer() {
   echo
   echo "Arrêt…"
-  [[ -n "${PID_API:-}" ]] && kill "$PID_API" 2>/dev/null
-  [[ -n "${PID_CF:-}" ]] && kill "$PID_CF" 2>/dev/null
+  for p in "${PID_API:-}" "${PID_CF:-}" "${PID_VEILLE:-}"; do
+    [[ -n "$p" ]] && kill "$p" 2>/dev/null
+  done
   exit 0
 }
 trap nettoyer INT TERM
+
+# Le Mac qui s'endort coupe le tunnel, et la démonstration meurt sans prévenir au milieu d'un
+# salon. caffeinate l'en empêche tant que ce script tourne, et rend la main à l'arrêt.
+if command -v caffeinate >/dev/null; then
+  caffeinate -dimsu &
+  PID_VEILLE=$!
+fi
 
 command -v cloudflared >/dev/null || { echo "cloudflared manquant : brew install cloudflared"; exit 1; }
 
@@ -72,8 +80,8 @@ cat <<FIN
   Faites scanner le QR ci-dessus, ou ouvrez qr_demo.png en
   plein écran pour le montrer de loin.
 
-  Laissez cette fenêtre ouverte et le Mac éveillé :
-  fermer le terminal ou laisser l'écran s'endormir coupe tout.
+  Laissez cette fenêtre ouverte : la fermer coupe tout.
+  La mise en veille est déjà bloquée pendant ce temps.
 
   Ctrl+C pour arrêter.
 

@@ -7,3 +7,6 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# QR régénéré à chaque lancement de demarrer_demo.sh
+qr_demo.png

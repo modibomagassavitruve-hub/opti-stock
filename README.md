@@ -3,19 +3,29 @@
 Identifier une monture d'optique à partir d'une photo, et pointer le stock en inventaire.
 
 ```bash
-uvicorn app:app --port 8000     # puis ouvrir http://localhost:8000
+./demarrer_demo.sh              # salon : adresse publique + QR code à scanner
+uvicorn app:app --port 8000     # local seul : http://localhost:8000
 ```
+
+`demarrer_demo.sh` lance l'API, ouvre un tunnel Cloudflare et affiche un QR code : l'opticien
+en face de vous scanne, l'application s'ouvre sur **son** téléphone, sans rien installer.
+L'adresse change à chaque lancement, le QR est régénéré. La mise en veille du Mac est bloquée
+tant que le script tourne — elle couperait le tunnel au milieu d'une démonstration.
 
 ---
 
 ## Utiliser
 
-**Identifier une monture.** Photographier, choisir la marque si elle est connue, valider la
-bonne proposition d'un clic. Préciser la marque fait passer le recall@5 de 0.807 à 0.867.
+**Entrer une monture** (onglet Saisir). Photographier la monture, puis son étiquette : l'OCR
+remplit marque, référence, coloris et calibre. Compléter, et c'est en stock avec sa quantité
+et son emplacement.
 
-**Entrer en stock.** Après validation, la monture s'entre en rayon avec sa quantité et son
-emplacement. C'est ce qui fait de l'identification autre chose qu'une curiosité : sans stock,
-elle ne débouchait sur rien.
+Ce parcours **ne dépend d'aucun modèle entraîné** : il fonctionne sur n'importe quelle
+monture, y compris celles qu'aucun catalogue ne connaît. C'est lui qu'on montre à un opticien
+dont on n'a jamais vu le stock.
+
+**Identifier une monture déjà connue.** Si elle est au catalogue entraîné, une photo suffit à
+la retrouver. Préciser la marque fait passer le recall@5 de 0.807 à 0.867.
 
 **Inventaire.** Démarrer une session, parcourir les rayons, compter. À la fin, l'**écart** :
 combien il devrait y en avoir, combien il y en a, référence par référence. Clôturer applique
