@@ -2,396 +2,553 @@
 <html lang="fr">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f7b6c">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>Opti-Stock</title>
 <style>
-  /* Fond ET texte définis explicitement : sans fond déclaré, le navigateur en thème sombre
-     peint un fond noir derrière un texte sombre, et la page devient illisible. */
+  /* Pensé pour le téléphone d'abord : c'est là que l'opticien saisit, au comptoir, debout,
+     d'une seule main. Le fond ET le texte sont déclarés explicitement -- sans fond déclaré,
+     un navigateur en thème sombre peint du noir derrière du texte sombre. */
   :root {
-    --fond: #ffffff; --encre: #1a1a1a; --trait: #dcdcdc; --gris: #666;
-    --rouge: #b00020; --vert: #1b7f3b; --champ: #ffffff; --bouton: #fafafa;
-    --ok-fond: #e8f5ec; --ok-trait: #b6dfc4;
-    --doute-fond: #fff4e5; --doute-trait: #f0d5a8; --doute-encre: #8a5a00;
+    --fond: #f6f7f8; --carte: #ffffff; --encre: #16181c; --doux: #6b7280;
+    --trait: #e3e6ea; --accent: #0f7b6c; --accent-encre: #ffffff;
+    --rouge: #b3261e; --vert: #0f7b3c; --ambre: #8a5a00;
+    --ok-fond: #e7f5ec; --ok-trait: #b6dfc4;
+    --doute-fond: #fdf3e2; --doute-trait: #f0d5a8;
+    --ombre: 0 1px 2px rgba(0,0,0,.05), 0 4px 14px rgba(0,0,0,.05);
   }
   @media (prefers-color-scheme: dark) {
     :root {
-      --fond: #17181a; --encre: #e8e8e8; --trait: #3a3c40; --gris: #a0a0a0;
-      --rouge: #ff6b6b; --vert: #5fd18a; --champ: #202226; --bouton: #26282c;
-      --ok-fond: #17331f; --ok-trait: #2d6b45;
-      --doute-fond: #33280f; --doute-trait: #6b5520; --doute-encre: #e8c46a;
+      --fond: #0f1113; --carte: #1a1d21; --encre: #e9eaec; --doux: #9aa1ab;
+      --trait: #2c3036; --accent: #2bb39c; --accent-encre: #06231e;
+      --rouge: #ff6b6b; --vert: #5fd18a; --ambre: #e8c46a;
+      --ok-fond: #12291d; --ok-trait: #2d6b45;
+      --doute-fond: #2c2312; --doute-trait: #6b5520;
+      --ombre: 0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.3);
     }
   }
-  * { box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-         max-width: 780px; margin: 0 auto; padding: 24px 16px 60px;
-         color: var(--encre); background: var(--fond); }
-  h1 { font-size: 1.3rem; margin-bottom: 4px; }
-  .sous-titre { color: var(--gris); font-size: .9rem; margin-top: 0; }
-  section { border: 1px solid var(--trait); border-radius: 10px; padding: 18px; margin-bottom: 20px; }
-  h2 { font-size: 1.05rem; margin: 0 0 12px; }
-  label { font-size: .9rem; color: var(--gris); display: inline-block; margin-right: 12px; }
-  select, input[type=number], input[type=text] { padding: 5px 7px; border: 1px solid var(--trait);
-    border-radius: 6px; font-size: .9rem; background: var(--champ); color: var(--encre); }
-  input[type=file] { display: block; margin: 10px 0; font-size: .9rem; }
-  button { padding: 9px 18px; border: 1px solid var(--trait); background: var(--bouton);
-    color: var(--encre); border-radius: 7px; cursor: pointer; font-size: .92rem; }
-  button:hover:not(:disabled) { border-color: var(--gris); }
-  button:disabled { opacity: .5; cursor: default; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; background: var(--fond); color: var(--encre);
+    font: 16px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    padding-bottom: calc(72px + env(safe-area-inset-bottom));
+  }
+  .page { max-width: 620px; margin: 0 auto; padding: 14px 14px 24px; }
+  .page[hidden] { display: none; }
 
-  .bandeau { padding: 11px 14px; border-radius: 8px; margin: 14px 0 10px; font-size: .92rem; }
-  .fiable { background: var(--ok-fond); border: 1px solid var(--ok-trait); color: var(--vert); }
-  .doute  { background: var(--doute-fond); border: 1px solid var(--doute-trait); color: var(--doute-encre); }
+  header {
+    position: sticky; top: 0; z-index: 10; background: var(--fond);
+    padding: 12px 14px 8px; border-bottom: 1px solid var(--trait);
+  }
+  header .barre { max-width: 620px; margin: 0 auto; display: flex; align-items: baseline;
+    justify-content: space-between; gap: 10px; }
+  header h1 { font-size: 1.05rem; margin: 0; letter-spacing: -.01em; }
+  header .etat { font-size: .78rem; color: var(--doux); }
 
-  .grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
-  .carte { border: 1px solid var(--trait); border-radius: 9px; overflow: hidden; cursor: pointer;
-    background: var(--champ); color: var(--encre); padding: 0; text-align: center; }
-  .carte:hover { border-color: #888; }
-  .carte.choisie { border-color: var(--vert); border-width: 2px; background: var(--ok-fond); }
-  /* contain, pas cover : certains recadrages sont des bandes allongees, et les rogner
-     davantage ne montrerait plus rien de la monture. */
-  .carte img { width: 100%; height: 110px; object-fit: contain; display: block;
-    background: var(--trait); }
-  .carte .nom { font-weight: 600; font-size: .9rem; padding: 7px 4px 1px; }
-  .carte .score { font-size: .78rem; color: var(--gris); padding-bottom: 8px; }
+  h2 { font-size: 1.15rem; margin: 2px 0 2px; letter-spacing: -.01em; }
+  .sous { color: var(--doux); font-size: .87rem; margin: 0 0 14px; }
 
-  .aide { font-size: .85rem; color: var(--gris); margin: 10px 0 0; }
-  .erreur { color: var(--rouge); font-size: .9rem; }
-  code { background: var(--champ); border: 1px solid var(--trait); padding: 1px 5px;
-    border-radius: 4px; font-size: .85rem; }
-  table { border-collapse: collapse; font-size: .9rem; width: 100%; }
-  td { padding: 4px 10px 4px 0; }
-  td:first-child { color: var(--gris); }
+  .carte { background: var(--carte); border: 1px solid var(--trait); border-radius: 14px;
+    padding: 14px; margin-bottom: 12px; box-shadow: var(--ombre); }
+
+  label.champ { display: block; margin-bottom: 10px; }
+  label.champ > span { display: block; font-size: .78rem; color: var(--doux);
+    margin-bottom: 4px; text-transform: uppercase; letter-spacing: .04em; }
+  input, select, textarea {
+    width: 100%; padding: 12px 12px; font-size: 16px;   /* 16px : evite le zoom iOS */
+    border: 1px solid var(--trait); border-radius: 10px;
+    background: var(--fond); color: var(--encre); font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--trait);
+    background: var(--carte); color: var(--encre); padding: 12px 16px; min-height: 46px; }
+  button:active { transform: scale(.985); }
+  button:disabled { opacity: .5; }
+  .primaire { background: var(--accent); color: var(--accent-encre); border-color: transparent;
+    font-weight: 600; width: 100%; }
+  .petit { padding: 7px 12px; min-height: 36px; font-size: .85rem; }
+
+  /* Zone photo : la cible la plus grande de l'écran, c'est le premier geste au comptoir. */
+  .photo-zone { position: relative; border: 2px dashed var(--trait); border-radius: 14px;
+    background: var(--fond); aspect-ratio: 4/3; display: grid; place-items: center;
+    overflow: hidden; text-align: center; color: var(--doux); margin-bottom: 12px; }
+  .photo-zone img { width: 100%; height: 100%; object-fit: cover; }
+  .photo-zone input[type=file] { position: absolute; inset: 0; opacity: 0; width: 100%;
+    height: 100%; }
+  .photo-zone .invite { font-size: .9rem; padding: 0 20px; pointer-events: none; }
+  .photo-zone .invite b { display: block; font-size: 2rem; margin-bottom: 4px; }
+
+  .bandeau { padding: 11px 13px; border-radius: 11px; margin: 10px 0; font-size: .9rem; }
+  .ok { background: var(--ok-fond); border: 1px solid var(--ok-trait); color: var(--vert); }
+  .doute { background: var(--doute-fond); border: 1px solid var(--doute-trait); color: var(--ambre); }
+  .err { color: var(--rouge); font-size: .9rem; }
+  .aide { color: var(--doux); font-size: .85rem; }
+
+  .ligne { display: flex; align-items: center; gap: 11px; padding: 11px 0;
+    border-bottom: 1px solid var(--trait); }
+  .ligne:last-child { border-bottom: none; }
+  .ligne img { width: 52px; height: 52px; border-radius: 9px; object-fit: cover;
+    background: var(--fond); flex: none; }
+  .ligne .txt { flex: 1; min-width: 0; }
+  /* Deux lignes plutôt qu'une troncature : « RAY-BAN RB5... » n'identifie aucune monture. */
+  .ligne .nom { font-weight: 600; font-size: .95rem; overflow: hidden;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .ligne .meta { font-size: .8rem; color: var(--doux); }
+  .qte { font-weight: 700; font-size: 1.05rem; min-width: 30px; text-align: right; }
+  .qte.zero { color: var(--doux); font-weight: 500; }
+
+  .grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 10px; }
+  .vignette { border: 1px solid var(--trait); border-radius: 11px; overflow: hidden;
+    background: var(--carte); padding: 0; text-align: center; }
+  .vignette.choisie { border-color: var(--accent); border-width: 2px; }
+  .vignette img { width: 100%; height: 78px; object-fit: contain; background: var(--fond);
+    display: block; }
+  .vignette .n { font-size: .78rem; padding: 6px 3px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+  td { padding: 7px 0; border-bottom: 1px solid var(--trait); }
+  td:last-child { text-align: right; font-weight: 700; }
+
+  /* Navigation au pouce : en bas, toujours atteignable. */
+  nav { position: fixed; bottom: 0; left: 0; right: 0; z-index: 20;
+    background: var(--carte); border-top: 1px solid var(--trait);
+    padding-bottom: env(safe-area-inset-bottom);
+    display: flex; }
+  nav button { flex: 1; border: none; background: none; border-radius: 0;
+    padding: 9px 2px 8px; color: var(--doux); font-size: .68rem; min-height: 60px;
+    display: flex; flex-direction: column; align-items: center; gap: 3px; }
+  nav button .i { font-size: 1.35rem; line-height: 1; }
+  nav button.actif { color: var(--accent); font-weight: 600; }
+
+  .vide { text-align: center; color: var(--doux); padding: 26px 16px; font-size: .9rem; }
+  .vide b { display: block; font-size: 2rem; margin-bottom: 6px; opacity: .55; }
+  .chargement { text-align: center; color: var(--doux); padding: 18px; font-size: .9rem; }
+  code { background: var(--fond); border: 1px solid var(--trait); padding: 1px 5px;
+    border-radius: 5px; font-size: .84rem; }
 </style>
 </head>
 <body>
 
-<h1>Opti-Stock</h1>
-<p class="sous-titre">Identification de monture par photo — <span id="nbMarques"></span></p>
-<p><label>API <input type="text" id="api" value="" size="26" placeholder="(cette page)"></label>
-   <button onclick="connecter()">Connecter</button> <span id="etatApi" class="aide"></span></p>
+<header><div class="barre">
+  <h1>Opti-Stock</h1>
+  <span class="etat" id="etatApi">connexion…</span>
+</div></header>
 
-<section>
-  <h2>Identifier une monture</h2>
-  <input type="file" id="photo" accept="image/*" capture="environment">
-  <label>Marque
-    <select id="marque"><option value="">— toutes —</option></select>
-  </label>
-  <label>Résultats <input type="number" id="k" value="5" min="1" max="12" style="width:3.5em"></label>
-  <button id="btnIdentifier" onclick="identifier()">Identifier</button>
-  <div id="sortie"></div>
-</section>
+<!-- ------------------------------------------------------------ SAISIR -->
+<div class="page" id="page-saisir">
+  <h2>Entrer une monture</h2>
+  <p class="sous">Photographiez la monture, puis son étiquette pour remplir les champs
+     automatiquement.</p>
 
-<section>
-  <h2>Lire une étiquette</h2>
-  <input type="file" id="photoEtiquette" accept="image/*" capture="environment">
-  <button onclick="lireEtiquette()">Lire</button>
-  <div id="sortieEtiquette"></div>
-</section>
+  <div class="carte">
+    <div class="photo-zone" id="zonePhoto">
+      <img id="apercuPhoto" alt="" hidden>
+      <div class="invite" id="invitePhoto"><b>📷</b>Photo de la monture</div>
+      <input type="file" id="photoMonture" accept="image/*" capture="environment"
+             onchange="apercu()">
+    </div>
 
-<section>
+    <button class="petit" style="width:100%;margin-bottom:12px" onclick="el('photoEtiquette').click()">
+      🏷️ Lire l'étiquette pour remplir les champs
+    </button>
+    <input type="file" id="photoEtiquette" accept="image/*" capture="environment"
+           style="display:none" onchange="lireEtiquette()">
+    <div id="sortieEtiquette"></div>
+
+    <label class="champ"><span>Marque *</span>
+      <input type="text" id="fMarque" list="marquesConnues" placeholder="ex. OCTIKA"
+             autocomplete="off" oninput="majBoutonSaisie()"></label>
+    <datalist id="marquesConnues"></datalist>
+
+    <label class="champ"><span>Référence</span>
+      <input type="text" id="fReference" placeholder="ex. OS866" autocomplete="off"></label>
+
+    <div class="duo">
+      <label class="champ"><span>Coloris</span>
+        <input type="text" id="fColoris" placeholder="001/51" autocomplete="off"></label>
+      <label class="champ"><span>Calibre</span>
+        <input type="text" id="fCalibre" placeholder="58" autocomplete="off"></label>
+    </div>
+    <div class="duo">
+      <label class="champ"><span>Quantité</span>
+        <input type="number" id="fQuantite" value="1" min="0" max="99"></label>
+      <label class="champ"><span>Emplacement</span>
+        <input type="text" id="fEmplacement" placeholder="vitrine A" autocomplete="off"></label>
+    </div>
+
+    <button class="primaire" id="btnSaisir" onclick="enregistrerMonture()" disabled>
+      Entrer en stock</button>
+    <div id="sortieSaisie"></div>
+  </div>
+
+  <div class="carte">
+    <h2 style="font-size:1rem">Reconnaître une monture déjà connue</h2>
+    <p class="aide" style="margin:4px 0 10px">Si la monture est déjà dans votre catalogue,
+       une photo suffit à la retrouver.</p>
+    <button class="petit" style="width:100%" onclick="el('photoIdent').click()">
+      🔍 Identifier par photo</button>
+    <input type="file" id="photoIdent" accept="image/*" capture="environment"
+           style="display:none" onchange="identifier()">
+    <div id="sortieIdent"></div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------- STOCK -->
+<div class="page" id="page-stock" hidden>
   <h2>Mon stock</h2>
-  <p class="aide">Ce qu'il y a en rayon, et où. C'est ce que l'inventaire compare, et ce que
-     le réseau propose aux confrères — une monture épuisée n'y apparaît plus.</p>
-  <p><button onclick="chargerStock()">Rafraîchir</button>
-     <label style="margin-left:10px">Voir <select id="filtreStock" onchange="chargerStock()">
-       <option value="rayon">en rayon</option>
-       <option value="tout">tout, épuisées comprises</option>
-     </select></label></p>
-  <div id="sortieStock"></div>
-</section>
+  <p class="sous" id="resumeStock">—</p>
+  <div class="carte">
+    <input type="text" id="filtreStock" placeholder="Rechercher une marque, une référence…"
+           oninput="afficherStock()" autocomplete="off">
+  </div>
+  <div class="carte" id="listeStock"><div class="chargement">Chargement…</div></div>
+</div>
 
-<section>
+<!-- -------------------------------------------------------- INVENTAIRE -->
+<div class="page" id="page-inventaire" hidden>
   <h2>Inventaire</h2>
-  <p class="aide">Parcourez les rayons et comptez chaque monture. Ce qui compte à la fin n'est
-     pas ce que vous avez trouvé, mais l'<strong>écart</strong> : combien il devrait y en
-     avoir, combien il y en a. La clôture corrige le stock — le rayon fait foi.</p>
-  <div id="inventaireBarre">
-    <input type="text" id="libelleInv" placeholder="ex. 2026" size="10">
-    <button onclick="demarrerInventaire()">Démarrer un inventaire</button>
-    <button onclick="listerInventaires()">Reprendre</button>
+  <p class="sous">Comptez le rayon. Ce qui compte à la fin, c'est l'écart avec le stock
+     théorique.</p>
+  <div class="carte" id="barreInventaire">
+    <label class="champ"><span>Libellé</span>
+      <input type="text" id="libelleInv" placeholder="ex. Silmo 2026"></label>
+    <div class="duo">
+      <button class="primaire" onclick="demarrerInventaire()">Démarrer</button>
+      <button onclick="listerInventaires()">Reprendre</button>
+    </div>
   </div>
   <div id="sortieInventaire"></div>
-</section>
+</div>
 
-<section>
+<!-- ------------------------------------------------------------ RÉSEAU -->
+<div class="page" id="page-reseau" hidden>
   <h2>Réseau entre opticiens</h2>
-  <p class="aide">Un client demande une monture que vous n'avez plus ? Cherchez-la chez un
-     confrère inscrit, et écrivez-lui directement.</p>
+  <p class="sous">Un client cherche une monture que vous n'avez plus ? Trouvez-la chez un
+     confrère et écrivez-lui.</p>
 
-  <div id="reseauInscription">
-    <p><input type="text" id="nomBoutique" placeholder="Nom de la boutique" size="22">
-       <input type="text" id="villeBoutique" placeholder="Ville" size="12">
-       <button onclick="inscrire()">S'inscrire au réseau</button></p>
-    <p class="aide">Démonstration : inscrivez deux boutiques pour voir les deux côtés de
-       l'échange. Vous pourrez basculer de l'une à l'autre.</p>
+  <div class="carte" id="reseauInscription">
+    <label class="champ"><span>Nom de la boutique</span>
+      <input type="text" id="nomBoutique" placeholder="Optique du Centre"></label>
+    <label class="champ"><span>Ville</span>
+      <input type="text" id="villeBoutique" placeholder="Lyon"></label>
+    <button class="primaire" onclick="inscrire()">S'inscrire au réseau</button>
+    <p class="aide" style="margin-bottom:0">Démonstration : inscrivez deux boutiques pour voir
+       les deux côtés de l'échange.</p>
   </div>
 
   <div id="reseauConnecte" hidden>
-    <p><label>Vous êtes <select id="boutiqueActive" onchange="changerBoutique()"></select></label>
-       <button style="padding:4px 10px;font-size:.85rem" onclick="el('reseauInscription').hidden=false">
-         Inscrire une autre boutique</button></p>
+    <div class="carte">
+      <label class="champ"><span>Vous êtes</span>
+        <select id="boutiqueActive" onchange="changerBoutique()"></select></label>
+      <button class="petit" onclick="el('reseauInscription').hidden=false">
+        Inscrire une autre boutique</button>
+    </div>
 
-    <h3 style="font-size:.95rem;margin:16px 0 6px">Ce que je propose au réseau</h3>
-    <p class="aide">Cochez les montures que vous acceptez de céder ou de dépanner. Le reste de
-       votre stock n'est jamais visible. Seules les montures dont la marque est renseignée
-       peuvent être partagées — sans marque, personne ne peut les reconnaître.</p>
-    <div id="monStock"></div>
+    <div class="carte">
+      <h2 style="font-size:1rem">Ce que je propose</h2>
+      <p class="aide" style="margin:4px 0 10px">Cochez ce que vous acceptez de céder. Le reste
+         de votre stock reste invisible.</p>
+      <div id="monStock"></div>
+    </div>
 
-    <h3 style="font-size:.95rem;margin:18px 0 6px">Chercher chez un confrère</h3>
-    <p><label>Marque <select id="marqueReseau"><option value="">—</option></select></label>
-       <label>Réf. <input type="text" id="refReseau" size="10" placeholder="si connue"></label>
-       <button onclick="chercherReseau()">Chercher</button></p>
-    <div id="sortieReseau"></div>
+    <div class="carte">
+      <h2 style="font-size:1rem">Chercher chez un confrère</h2>
+      <label class="champ" style="margin-top:8px"><span>Marque</span>
+        <select id="marqueReseau"><option value="">—</option></select></label>
+      <label class="champ"><span>Référence (si connue)</span>
+        <input type="text" id="refReseau" placeholder="OS866"></label>
+      <button class="primaire" onclick="chercherReseau()">Chercher</button>
+      <div id="sortieReseau"></div>
+    </div>
 
-    <h3 style="font-size:.95rem;margin:18px 0 6px">Mes échanges</h3>
-    <div id="sortieMessages"></div>
+    <div class="carte">
+      <h2 style="font-size:1rem">Mes échanges</h2>
+      <div id="sortieMessages"></div>
+    </div>
   </div>
-</section>
+</div>
 
-<section>
+<!-- ------------------------------------------------------------ FIABILITÉ -->
+<div class="page" id="page-plus" hidden>
   <h2>Fiabilité constatée</h2>
-  <p class="aide">Calculée sur les identifications que vous avez validées ci-dessus. C'est la
-     seule mesure prise dans vos conditions réelles.</p>
-  <button onclick="bilan()">Rafraîchir</button>
-  <div id="sortieBilan"></div>
-</section>
+  <p class="sous">Calculée sur vos validations. C'est la seule mesure prise dans vos
+     conditions réelles.</p>
+  <div class="carte">
+    <button class="petit" onclick="bilan()">Rafraîchir</button>
+    <div id="sortieBilan"></div>
+  </div>
+  <div class="carte">
+    <h2 style="font-size:1rem">Connexion</h2>
+    <label class="champ" style="margin-top:8px"><span>Adresse de l'API</span>
+      <input type="text" id="api" placeholder="(cette page)"></label>
+    <button class="petit" onclick="connecter()">Reconnecter</button>
+  </div>
+</div>
+
+<nav>
+  <button class="actif" data-page="saisir"  onclick="onglet('saisir')"><span class="i">➕</span>Saisir</button>
+  <button data-page="stock"      onclick="onglet('stock')"><span class="i">📦</span>Stock</button>
+  <button data-page="inventaire" onclick="onglet('inventaire')"><span class="i">📋</span>Inventaire</button>
+  <button data-page="reseau"     onclick="onglet('reseau')"><span class="i">🤝</span>Réseau</button>
+  <button data-page="plus"       onclick="onglet('plus')"><span class="i">📊</span>Fiabilité</button>
+</nav>
 
 <script>
-let derniereReponse = null;
+const el = (id) => document.getElementById(id);
+const api = () => el('api').value.trim().replace(/\/$/, '');
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 
-// Vide = même origine que la page : l'API se sert elle-même via GET /
-const api = () => document.getElementById('api').value.trim().replace(/\/$/, '');
-const el  = (id) => document.getElementById(id);
+let stockCache = [];
+
+function onglet(nom) {
+  document.querySelectorAll('.page').forEach(p => p.hidden = p.id !== 'page-' + nom);
+  document.querySelectorAll('nav button').forEach(b =>
+    b.classList.toggle('actif', b.dataset.page === nom));
+  window.scrollTo(0, 0);
+  if (nom === 'stock') chargerStock();
+  if (nom === 'plus') bilan();
+  if (nom === 'reseau' && boutiques.length) changerBoutique();
+}
 
 async function connecter() {
   try {
-    const r = await fetch(api() + '/marques');
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const marques = (await r.json()).marques;
-    const select = el('marque');
-    select.innerHTML = '<option value="">— toutes —</option>';
-    marques.forEach(m => select.add(new Option(m, m)));
-    const reseau = el('marqueReseau');
-    reseau.innerHTML = '<option value="">—</option>';
-    marques.forEach(m => reseau.add(new Option(m, m)));
-    el('nbMarques').textContent = marques.length + ' marques au catalogue';
-    el('etatApi').textContent = 'connecté';
+    const marques = (await fetch(api() + '/marques').then(r => r.json())).marques;
+    for (const id of ['marquesConnues', 'marqueReseau']) {
+      const cible = el(id);
+      cible.innerHTML = id === 'marqueReseau' ? '<option value="">—</option>' : '';
+      marques.forEach(m => cible.appendChild(new Option(m, m)));
+    }
+    el('etatApi').textContent = marques.length + ' marques connues';
   } catch (e) {
-    el('etatApi').innerHTML = '<span class="erreur">injoignable — l\'API est-elle démarrée ?</span>';
+    el('etatApi').innerHTML = '<span class="err">hors ligne</span>';
   }
 }
+
+// ------------------------------------------------------------------ saisie
+let apercuUrl = null;
+
+function apercu() {
+  const f = el('photoMonture').files[0];
+  if (apercuUrl) URL.revokeObjectURL(apercuUrl);   // sinon chaque photo fuit en mémoire
+  apercuUrl = f ? URL.createObjectURL(f) : null;
+  el('apercuPhoto').src = apercuUrl || '';
+  el('apercuPhoto').hidden = !f;
+  el('invitePhoto').hidden = !!f;
+  majBoutonSaisie();
+}
+
+function majBoutonSaisie() {
+  el('btnSaisir').disabled = !el('fMarque').value.trim();
+}
+
+/** L'étiquette dicte les champs : c'est ce qui fait la différence entre une saisie de dix
+ *  secondes et une saisie d'une minute, au comptoir, debout. */
+async function lireEtiquette() {
+  const f = el('photoEtiquette').files[0];
+  if (!f) return;
+  el('sortieEtiquette').innerHTML = '<p class="chargement">Lecture de l\'étiquette…</p>';
+  try {
+    const form = new FormData();
+    form.append('photo', f);
+    const d = await fetch(api() + '/lire-etiquette', { method: 'POST', body: form })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+
+    const remplis = [];
+    for (const [champ, valeur] of [['fMarque', d.marque], ['fReference', d.reference],
+                                    ['fColoris', d.coloris_code], ['fCalibre', d.calibre]]) {
+      if (valeur && !el(champ).value.trim()) { el(champ).value = valeur; remplis.push(valeur); }
+    }
+    majBoutonSaisie();
+    el('sortieEtiquette').innerHTML = remplis.length
+      ? `<div class="bandeau ok">Lu : ${esc(remplis.join(' · '))}. Vérifiez avant d'enregistrer.</div>`
+      : `<div class="bandeau doute">Rien de lisible. Cadrez l'intérieur de la branche, de
+         près et bien éclairé — ou saisissez à la main.</div>`;
+  } catch (e) {
+    el('sortieEtiquette').innerHTML = `<p class="err">Lecture impossible : ${esc(e.message)}</p>`;
+  }
+}
+
+async function enregistrerMonture() {
+  const params = new URLSearchParams({
+    marque: el('fMarque').value.trim(), reference: el('fReference').value.trim(),
+    coloris: el('fColoris').value.trim(), calibre: el('fCalibre').value.trim(),
+    quantite: el('fQuantite').value || '1', emplacement: el('fEmplacement').value.trim(),
+  });
+  const form = new FormData();
+  const photo = el('photoMonture').files[0];
+  if (photo) form.append('photo', photo);
+
+  const bouton = el('btnSaisir');
+  bouton.disabled = true;
+  bouton.textContent = 'Enregistrement…';
+  try {
+    const d = await fetch(api() + '/monture?' + params, { method: 'POST', body: form })
+      .then(async r => { if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
+                          return r.json(); });
+    el('sortieSaisie').innerHTML = `<div class="bandeau ok"><strong>${esc(d.libelle)}</strong>
+      entrée en stock — ${d.stock.quantite} en rayon${d.stock.emplacement ?
+      ' · ' + esc(d.stock.emplacement) : ''}.</div>`;
+    reinitialiserSaisie();
+    stockCache = [];
+  } catch (e) {
+    el('sortieSaisie').innerHTML = `<p class="err">Échec : ${esc(e.message)}</p>`;
+  } finally {
+    bouton.textContent = 'Entrer en stock';
+    majBoutonSaisie();
+  }
+}
+
+/** L'emplacement est conservé : au comptoir on range plusieurs montures au même endroit
+ *  d'affilée, et le retaper à chaque fois est la première chose qui fait abandonner. */
+function reinitialiserSaisie() {
+  ['fMarque', 'fReference', 'fColoris', 'fCalibre'].forEach(c => el(c).value = '');
+  el('fQuantite').value = '1';
+  el('photoMonture').value = '';
+  el('photoEtiquette').value = '';
+  el('sortieEtiquette').innerHTML = '';
+  apercu();
+}
+
+// ------------------------------------------------------------ identification
+let derniereReponse = null;
 
 async function identifier() {
-  const fichier = el('photo').files[0];
-  if (!fichier) { el('sortie').innerHTML = '<p class="erreur">Choisissez une photo.</p>'; return; }
-
-  const bouton = el('btnIdentifier');
-  bouton.disabled = true;
-  el('sortie').innerHTML = '<p class="aide">Analyse en cours…</p>';
+  const f = el('photoIdent').files[0];
+  if (!f) return;
+  el('sortieIdent').innerHTML = '<p class="chargement">Analyse…</p>';
   try {
     const form = new FormData();
-    form.append('photo', fichier);
-    const params = new URLSearchParams({ k: el('k').value });
-    if (el('marque').value) params.set('marque', el('marque').value);
+    form.append('photo', f);
+    derniereReponse = await fetch(api() + '/identifier?k=6', { method: 'POST', body: form })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
 
-    const r = await fetch(api() + '/identifier?' + params, { method: 'POST', body: form });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    derniereReponse = await r.json();
-    afficher(derniereReponse);
+    const r = derniereReponse.resultats || [];
+    if (!r.length) { el('sortieIdent').innerHTML = '<p class="aide">Catalogue vide.</p>'; return; }
+
+    // Sous le seuil, la première proposition est fausse 3 fois sur 4 : elle ne doit jamais
+    // être présentée comme une réponse.
+    const bandeau = derniereReponse.fiable
+      ? `<div class="bandeau ok"><strong>${esc(r[0].monture)}</strong> — correspondance nette.
+         Confirmez d'un toucher.</div>`
+      : `<div class="bandeau doute">Aucune correspondance certaine. Voici les plus proches ;
+         si aucune ne convient, saisissez-la ci-dessus.</div>`;
+
+    el('sortieIdent').innerHTML = bandeau + `<div class="grille">` + r.map(x => `
+      <button class="vignette" onclick="validerIdent(this,'${esc(x.monture)}')">
+        <img src="${api()}/monture/${encodeURIComponent(x.monture)}/photo" alt="" loading="lazy">
+        <div class="n">${esc(x.monture)}</div>
+      </button>`).join('') + `</div>
+      <p class="aide" style="margin-top:8px">Chaque confirmation mesure la fiabilité réelle.</p>
+      <div id="confIdent"></div>`;
   } catch (e) {
-    el('sortie').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
-  } finally {
-    bouton.disabled = false;
+    el('sortieIdent').innerHTML = `<p class="err">Échec : ${esc(e.message)}</p>`;
   }
 }
 
-function afficher(d) {
-  const r = d.resultats || [];
-  if (!r.length) { el('sortie').innerHTML = '<p class="aide">Catalogue vide.</p>'; return; }
+async function validerIdent(carte, monture) {
+  if (!derniereReponse?.journal_id) return;
+  document.querySelectorAll('.vignette').forEach(v => v.classList.remove('choisie'));
+  carte.classList.add('choisie');
+  await fetch(api() + '/journal/' + derniereReponse.journal_id + '/choix?monture=' +
+              encodeURIComponent(monture), { method: 'POST' });
 
-  // Une réponse que le modèle n'assume pas n'est jamais présentée comme une identification :
-  // sous le seuil, la première proposition est fausse 3 fois sur 4.
-  const bandeau = d.fiable
-    ? `<div class="bandeau fiable"><strong>${r[0].monture}</strong> — correspondance nette
-       (${r[0].similarite.toFixed(2)}). À confirmer d'un clic.</div>`
-    : `<div class="bandeau doute"><strong>Aucune correspondance certaine.</strong>
-       Voici les montures les plus proches ; si aucune ne convient, cherchez par l'étiquette.</div>`;
-
-  const filtre = d.marque_filtree
-    ? `<p class="aide">Recherche limitée à ${d.marque_filtree} — ${d.candidats} photos comparées.</p>`
-    : `<p class="aide">${d.candidats} photos comparées. Préciser la marque améliore nettement le résultat.</p>`;
-
-  const cartes = r.map(x => `
-    <button class="carte" onclick="valider(this,'${x.monture}')">
-      <img src="${api()}/monture/${encodeURIComponent(x.monture)}/photo" alt="" loading="lazy">
-      <div class="nom">${x.monture}</div>
-      <div class="score">${x.similarite.toFixed(3)}</div>
-    </button>`).join('');
-
-  // La monture identifiée n'est pas forcément en rayon : le geste suivant de l'opticien est de
-  // la chercher chez un confrère. Le bouton évite qu'il ait à retaper la marque.
-  const versReseau = (boutiques.length && r[0].marque)
-    ? `<button style="padding:4px 10px;font-size:.85rem" onclick="chercherReseau('${r[0].marque}','')">
-         Chercher « ${r[0].marque} » dans le réseau</button>` : '';
-
-  el('sortie').innerHTML = bandeau + filtre +
-    `<div class="grille">${cartes}</div>
-     <p class="aide">Cliquez la bonne monture : chaque validation mesure la fiabilité réelle et
-        servira à améliorer le modèle.
-        <button style="padding:4px 10px;font-size:.85rem" onclick="valider(null,'')">Aucune ne correspond</button>
-        ${versReseau}</p>
-     <div id="confirmation"></div>`;
-}
-
-async function valider(carte, monture) {
-  if (!derniereReponse || !derniereReponse.journal_id) return;
-  try {
-    const r = await fetch(api() + '/journal/' + derniereReponse.journal_id +
-                          '/choix?monture=' + encodeURIComponent(monture || 'aucune'),
-                          { method: 'POST' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    document.querySelectorAll('.carte').forEach(c => c.classList.remove('choisie'));
-    if (carte) carte.classList.add('choisie');
-
-    // Un inventaire ouvert : la validation sert aussi de pointage. L'opticien fait un seul
-    // geste — photographier, confirmer — au lieu de valider puis pointer séparément.
-    let pointee = '';
-    if (inventaireEnCours && monture) {
-      const r = await fetch(api() + '/inventaire/' + inventaireEnCours +
-                            '/compter?monture=' + encodeURIComponent(monture), { method: 'POST' });
-      if (r.ok) { pointee = ' et pointé dans l\'inventaire'; await rafraichirInventaire(); }
-    }
-    // Hors inventaire, le geste suivant est d'entrer la monture en stock : sans ça
-    // l'identification ne débouchait sur rien.
-    const entree = (monture && !inventaireEnCours) ? `
-      <p class="aide" style="margin-top:8px">Entrer en stock :
-         <input type="number" id="qteEntree" value="1" min="1" max="99" style="width:3.5em">
-         <input type="text" id="emplacementEntree" placeholder="emplacement" size="12">
-         <button style="padding:4px 10px;font-size:.85rem"
-            onclick="entrerEnStock('${monture}')">Entrer</button></p>` : '';
-
-    el('confirmation').innerHTML = '<p class="aide">' +
-      (monture ? 'Enregistré : ' + monture + pointee : 'Enregistré : aucune correspondance') +
-      '.</p>' + entree;
-  } catch (e) {
-    el('confirmation').innerHTML = '<p class="erreur">Enregistrement impossible : ' + e.message + '</p>';
+  let note = '';
+  if (inventaireEnCours) {
+    const r = await fetch(api() + '/inventaire/' + inventaireEnCours + '/compter?monture=' +
+                          encodeURIComponent(monture), { method: 'POST' });
+    if (r.ok) note = ' et comptée dans l\'inventaire';
   }
+  el('confIdent').innerHTML = `<div class="bandeau ok">${esc(monture)} confirmée${note}.
+    <button class="petit" style="margin-top:8px" onclick="entrerStock('${esc(monture)}',1)">
+      +1 en stock</button></div>`;
 }
 
-async function lireEtiquette() {
-  const fichier = el('photoEtiquette').files[0];
-  if (!fichier) { el('sortieEtiquette').innerHTML = '<p class="erreur">Choisissez une photo.</p>'; return; }
-  el('sortieEtiquette').innerHTML = '<p class="aide">Lecture…</p>';
-  try {
-    const form = new FormData();
-    form.append('photo', fichier);
-    const r = await fetch(api() + '/lire-etiquette', { method: 'POST', body: form });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const d = await r.json();
-    const champs = [['Marque', d.marque], ['Référence', d.reference], ['Coloris', d.coloris_code],
-                    ['Calibre', d.calibre], ['Pont', d.pont], ['Branche', d.branche]]
-                   .filter(([, v]) => v);
-    el('sortieEtiquette').innerHTML = champs.length
-      ? '<table>' + champs.map(([k, v]) => `<tr><td>${k}</td><td><strong>${v}</strong></td></tr>`).join('') +
-        `</table><p class="aide">Texte lu : <code>${d.texte_brut || '(rien)'}</code></p>`
-      : `<p class="aide">Rien de lisible. Texte brut : <code>${d.texte_brut || '(vide)'}</code><br>
-         Cadrez la branche de près, bien éclairée.</p>`;
-  } catch (e) {
-    el('sortieEtiquette').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
-  }
-}
-
-// ----------------------------------------------------------------------- stock
+// ------------------------------------------------------------------- stock
 async function chargerStock() {
   try {
     const d = await fetch(api() + '/stock').then(r => r.json());
-    const tout = el('filtreStock').value === 'tout';
-    const lignes = d.lignes.filter(l => tout || l.quantite > 0);
-
-    el('sortieStock').innerHTML = `
-      <p class="aide">${d.bilan.pieces} pièces, ${d.bilan.references_en_stock} références en
-         rayon${d.bilan.epuisees.length ? `, ${d.bilan.epuisees.length} épuisée(s)` : ''}.</p>
-      ${lignes.length ? `<table>
-        ${lignes.map(l => `<tr>
-          <td>${l.marque ? '<strong>' + l.marque + '</strong> ' : ''}${l.monture}</td>
-          <td>${l.emplacement || '—'}</td>
-          <td><strong style="color:${l.quantite ? 'var(--vert)' : 'var(--gris)'}">${l.quantite}</strong></td>
-          <td><button style="padding:2px 8px;font-size:.8rem"
-                onclick="mouvementStock('${l.monture}','sortie')">vendre</button>
-              <button style="padding:2px 8px;font-size:.8rem"
-                onclick="mouvementStock('${l.monture}','entree')">+1</button></td>
-        </tr>`).join('')}</table>`
-        : `<p class="aide">Rien en rayon. Identifiez une monture ci-dessus et entrez-la en stock.</p>`}`;
+    stockCache = d.lignes;
+    el('resumeStock').textContent =
+      `${d.bilan.pieces} pièces · ${d.bilan.references_en_stock} références` +
+      (d.bilan.epuisees.length ? ` · ${d.bilan.epuisees.length} épuisée(s)` : '');
+    afficherStock();
   } catch (e) {
-    el('sortieStock').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+    el('listeStock').innerHTML = `<p class="err">Échec : ${esc(e.message)}</p>`;
   }
 }
 
-async function mouvementStock(monture, sens) {
-  const url = `${api()}/stock/${encodeURIComponent(monture)}/${sens}?quantite=1` +
-              (sens === 'sortie' ? '&motif=vente' : '');
-  const r = await fetch(url, { method: 'POST' });
-  if (!r.ok) { alert(((await r.json()).detail) || 'HTTP ' + r.status); return; }
+function afficherStock() {
+  const q = el('filtreStock').value.trim().toLowerCase();
+  const lignes = stockCache.filter(l =>
+    !q || `${l.libelle} ${l.marque} ${l.reference} ${l.emplacement}`.toLowerCase().includes(q));
+
+  el('listeStock').innerHTML = lignes.length ? lignes.map(l => `
+    <div class="ligne">
+      <img src="${api()}/monture/${encodeURIComponent(l.monture)}/photo" alt="" loading="lazy"
+           onerror="this.style.visibility='hidden'">
+      <div class="txt">
+        <div class="nom">${esc(l.libelle || l.monture)}</div>
+        <div class="meta">${esc(l.emplacement || 'sans emplacement')}</div>
+      </div>
+      <span class="qte ${l.quantite ? '' : 'zero'}">${l.quantite}</span>
+      <button class="petit" onclick="sortirStock('${esc(l.monture)}')"
+        ${l.quantite ? '' : 'disabled'}>−</button>
+      <button class="petit" onclick="entrerStock('${esc(l.monture)}',1)">+</button>
+    </div>`).join('')
+    : `<div class="vide"><b>📦</b>${q ? 'Aucune monture ne correspond.'
+        : 'Rien en stock. Commencez par l\'onglet Saisir.'}</div>`;
+}
+
+async function entrerStock(monture, n) {
+  const r = await fetch(`${api()}/stock/${encodeURIComponent(monture)}/entree?quantite=${n}`,
+                        { method: 'POST' });
+  if (r.ok) await chargerStock();
+}
+
+async function sortirStock(monture) {
+  const r = await fetch(`${api()}/stock/${encodeURIComponent(monture)}/sortie?quantite=1&motif=vente`,
+                        { method: 'POST' });
+  if (!r.ok) { alert((await r.json()).detail || 'Impossible'); return; }
   await chargerStock();
 }
 
-/** Le maillon qui manquait : identifier une monture ne servait à rien tant qu'on ne pouvait
- *  pas l'entrer en stock dans la foulée. */
-async function entrerEnStock(monture) {
-  const quantite = parseInt(el('qteEntree').value || '1', 10);
-  const emplacement = encodeURIComponent(el('emplacementEntree').value.trim());
-  const url = `${api()}/stock/${encodeURIComponent(monture)}/entree?quantite=${quantite}` +
-              `&emplacement=${emplacement}`;
-  try {
-    const r = await fetch(url, { method: 'POST' });
-    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
-    const d = await r.json();
-    el('confirmation').innerHTML = `<p class="aide">Entrée en stock : <strong>${monture}</strong>,
-      ${d.quantite} en rayon${d.emplacement ? ' — ' + d.emplacement : ''}.</p>`;
-    await chargerStock();
-  } catch (e) {
-    el('confirmation').innerHTML = '<p class="erreur">Entrée impossible : ' + e.message + '</p>';
-  }
-}
-
-// ------------------------------------------------------------------ inventaire
+// -------------------------------------------------------------- inventaire
 let inventaireEnCours = null;
 
 async function demarrerInventaire() {
-  const libelle = encodeURIComponent(el('libelleInv').value || '');
   try {
-    const r = await fetch(api() + '/inventaire?libelle=' + libelle, { method: 'POST' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    inventaireEnCours = (await r.json()).session;
+    const d = await fetch(api() + '/inventaire?libelle=' +
+      encodeURIComponent(el('libelleInv').value || ''), { method: 'POST' }).then(r => r.json());
+    inventaireEnCours = d.session;
     await rafraichirInventaire();
   } catch (e) {
-    el('sortieInventaire').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+    el('sortieInventaire').innerHTML = `<p class="err">Échec : ${esc(e.message)}</p>`;
   }
 }
 
 async function listerInventaires() {
-  const sessions = await fetch(api() + '/inventaire').then(r => r.json());
-  if (!sessions.length) {
-    el('sortieInventaire').innerHTML = '<p class="aide">Aucun inventaire pour l\'instant.</p>';
-    return;
-  }
-  el('sortieInventaire').innerHTML = sessions.map(s => `
-    <p class="aide"><button style="padding:4px 10px;font-size:.85rem"
-       onclick="ouvrirInventaire('${s.session}')">${s.libelle || s.session}</button>
-       ${s.pieces_comptees}/${s.pieces_attendues} pièces comptées — ${s.statut}</p>`).join('');
+  const s = await fetch(api() + '/inventaire').then(r => r.json());
+  el('sortieInventaire').innerHTML = s.length
+    ? '<div class="carte">' + s.map(x => `
+        <div class="ligne"><div class="txt">
+          <div class="nom">${esc(x.libelle || x.session)}</div>
+          <div class="meta">${x.pieces_comptees}/${x.pieces_attendues} pièces · ${x.statut}</div>
+        </div><button class="petit" onclick="ouvrirInventaire('${x.session}')">Ouvrir</button></div>`
+      ).join('') + '</div>'
+    : '<div class="vide"><b>📋</b>Aucun inventaire pour l\'instant.</div>';
 }
 
-async function ouvrirInventaire(session) {
-  inventaireEnCours = session;
-  await rafraichirInventaire();
-}
+async function ouvrirInventaire(s) { inventaireEnCours = s; await rafraichirInventaire(); }
 
-/** Un écart, pas un décompte : « il m'en manque 2 sur 5 » est la phrase que l'inventaire doit
- *  produire. Le détail par monture prime sur le total, qui peut masquer des écarts opposés. */
 function ligneEcart(l) {
-  return `<tr><td>${l.monture}</td><td>${l.comptee} / ${l.theorique}</td>
-          <td><strong style="color:${l.ecart < 0 ? 'var(--rouge)' : 'var(--vert)'}">
-          ${l.ecart > 0 ? '+' : ''}${l.ecart}</strong></td></tr>`;
+  return `<tr><td>${esc(l.monture)}</td><td>${l.comptee} / ${l.theorique}</td>
+    <td style="color:${l.ecart < 0 ? 'var(--rouge)' : 'var(--vert)'}">
+    ${l.ecart > 0 ? '+' : ''}${l.ecart}</td></tr>`;
 }
 
 async function rafraichirInventaire() {
@@ -400,65 +557,50 @@ async function rafraichirInventaire() {
   const juste = !e.manquantes.length && !e.en_trop.length;
 
   el('sortieInventaire').innerHTML = `
-    <div class="bandeau ${juste ? 'fiable' : 'doute'}">
-      <strong>${e.libelle || e.session}</strong> — ${e.pieces_comptees} pièces comptées sur
-      ${e.pieces_attendues} attendues.
-      ${juste ? 'Aucun écart.' : `${e.manquantes.length} référence(s) en moins,
-         ${e.en_trop.length} en plus.`}
-      ${e.statut === 'clos' ? ' Inventaire clos, stock corrigé.' : ''}
+    <div class="bandeau ${juste ? 'ok' : 'doute'}">
+      <strong>${esc(e.libelle || e.session)}</strong> — ${e.pieces_comptees} comptées sur
+      ${e.pieces_attendues}. ${juste ? 'Aucun écart.'
+        : `${e.manquantes.length} en moins, ${e.en_trop.length} en plus.`}
+      ${e.statut === 'clos' ? ' Clos, stock corrigé.' : ''}
     </div>
-    ${e.hors_stock.length ? `<p class="aide">⚠ ${e.hors_stock.length} monture(s) en rayon mais
-       absente(s) du stock théorique : ${e.hors_stock.join(', ')}</p>` : ''}
-    <p class="aide">Identifiez une monture ci-dessus, puis validez-la : elle sera comptée
-       automatiquement dans cet inventaire.</p>
-    ${e.manquantes.length ? `<details open><summary class="aide" style="cursor:pointer">
-       ${e.manquantes.length} référence(s) manquante(s)</summary>
-       <table>${e.manquantes.map(ligneEcart).join('')}</table></details>` : ''}
-    ${e.en_trop.length ? `<details><summary class="aide" style="cursor:pointer">
-       ${e.en_trop.length} référence(s) en trop</summary>
-       <table>${e.en_trop.map(ligneEcart).join('')}</table></details>` : ''}
-    ${e.statut === 'en_cours' ? `<button style="margin-top:10px"
-       onclick="cloturerInventaire()">Clôturer et corriger le stock</button>
-       <p class="aide">La clôture applique les quantités comptées au stock : le rayon fait
-          foi, et chaque correction garde sa trace.</p>` : ''}`;
+    <div class="carte">
+      <p class="aide">Identifiez une monture dans l'onglet Saisir : elle sera comptée ici
+         automatiquement.</p>
+      ${e.manquantes.length ? `<table>${e.manquantes.map(ligneEcart).join('')}</table>` : ''}
+      ${e.en_trop.length ? `<p class="aide" style="margin-top:10px">En trop :</p>
+         <table>${e.en_trop.map(ligneEcart).join('')}</table>` : ''}
+      ${e.statut === 'en_cours' ? `<button class="primaire" style="margin-top:12px"
+         onclick="cloturerInventaire()">Clôturer et corriger le stock</button>` : ''}
+    </div>`;
 }
 
 async function cloturerInventaire() {
   if (!confirm('Clôturer applique les quantités comptées au stock. Continuer ?')) return;
   const r = await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
-  if (!r.ok) { alert('Clôture impossible : ' + ((await r.json()).detail || r.status)); return; }
+  if (!r.ok) { alert((await r.json()).detail || 'Impossible'); return; }
   await rafraichirInventaire();
-  await chargerStock();
+  stockCache = [];
 }
 
-/** Le seuil livré a été calibré sur des photos d'une seule séance. En boutique il est
- *  probablement trop permissif, et ça ne se voit pas sans cette comparaison : l'appli
- *  continuerait d'afficher « correspondance nette » sur des cas où elle a tort. */
+// ---------------------------------------------------------------- fiabilité
 function alerteSeuil(s) {
   const reel = s.reel_au_seuil_actuel;
   if (!reel || reel.precision === null || !s.validations) return '';
-
-  const justesse = (reel.precision * 100).toFixed(0);
-  const mesure = `<p class="aide">Seuil en service ${s.seuil_actuel.toFixed(3)} :
-     sur votre usage, l'appli répond ${(reel.couverture * 100).toFixed(0)} % du temps
-     et a raison <strong>${justesse} %</strong> (${reel.repondus} cas).</p>`;
-
-  if (!s.assez) return mesure + `<p class="aide">Encore ${s.minimum - s.validations} validation(s)
-     avant de pouvoir recalibrer : en dessous, le nouveau seuil viendrait du bruit.</p>`;
-
-  if (s.seuil_propose && s.atteignable && Math.abs(s.seuil_propose - s.seuil_actuel) >= 0.005) {
+  const mesure = `<p class="aide">Seuil en service ${s.seuil_actuel.toFixed(3)} : répond
+    ${(reel.couverture * 100).toFixed(0)} % du temps, juste
+    <strong>${(reel.precision * 100).toFixed(0)} %</strong> (${reel.repondus} cas).</p>`;
+  if (!s.assez) return mesure + `<p class="aide">Encore ${s.minimum - s.validations}
+    validation(s) avant de pouvoir recalibrer.</p>`;
+  if (s.atteignable === false) return mesure + `<div class="bandeau doute">Aucun seuil
+    n'atteint la justesse visée : l'appli ne devrait jamais se déclarer sûre.</div>`;
+  if (s.seuil_propose && Math.abs(s.seuil_propose - s.seuil_actuel) >= 0.005) {
     const p = s.reel_au_seuil_propose;
-    return mesure + `<div class="bandeau doute">Le seuil mérite d'être recalibré :
+    return mesure + `<div class="bandeau doute">À recalibrer :
       <strong>${s.seuil_propose.toFixed(3)}</strong> donnerait
       ${(p.precision * 100).toFixed(0)} % de justesse sur ${(p.couverture * 100).toFixed(0)} %
-      des cas. Lancer <code>python apprendre.py --appliquer-seuil</code>.</div>`;
+      des cas. <code>python apprendre.py --appliquer-seuil</code></div>`;
   }
-  if (s.atteignable === false) {
-    return mesure + `<div class="bandeau doute">Aucun seuil n'atteint la justesse visée sur
-      votre usage : l'appli ne devrait jamais se déclarer sûre. Mieux vaut ne rien affirmer
-      que d'affirmer sur du bruit.</div>`;
-  }
-  return mesure + `<p class="aide">Le seuil en service est le bon.</p>`;
+  return mesure + '<p class="aide">Le seuil en service est le bon.</p>';
 }
 
 async function bilan() {
@@ -468,27 +610,26 @@ async function bilan() {
       fetch(api() + '/journal/seuil').then(r => r.json()).catch(() => null),
     ]);
     if (!d.validees) {
-      el('sortieBilan').innerHTML = `<p class="aide">${d.predictions || 0} identification(s),
-        aucune validée pour l'instant. Aucun chiffre ne peut être annoncé sans vos validations.</p>`;
+      el('sortieBilan').innerHTML = `<p class="aide" style="margin-top:12px">${d.predictions || 0}
+        identification(s), aucune confirmée. Aucun chiffre ne peut être annoncé sans vos
+        confirmations.</p>`;
       return;
     }
-    el('sortieBilan').innerHTML = `<table>
-      <tr><td>Identifications validées</td><td><strong>${d.validees}</strong></td></tr>
-      <tr><td>Bonne monture en 1re position</td><td><strong>${(d['recall@1'] * 100).toFixed(0)} %</strong></td></tr>
-      <tr><td>Bonne monture dans les 5</td><td><strong>${(d['recall@5'] * 100).toFixed(0)} %</strong></td></tr>
+    el('sortieBilan').innerHTML = `<table style="margin-top:12px">
+      <tr><td>Confirmées</td><td>${d.validees}</td></tr>
+      <tr><td>Bonne monture en 1re</td><td>${(d['recall@1'] * 100).toFixed(0)} %</td></tr>
+      <tr><td>Bonne monture dans les 5</td><td>${(d['recall@5'] * 100).toFixed(0)} %</td></tr>
       ${d.precision_si_fiable !== null ? `<tr><td>Justesse quand l'appli est sûre</td>
-        <td><strong>${(d.precision_si_fiable * 100).toFixed(0)} %</strong>
-        sur ${d.marquees_fiables} cas</td></tr>` : ''}
+        <td>${(d.precision_si_fiable * 100).toFixed(0)} %</td></tr>` : ''}
     </table>` + (s ? alerteSeuil(s) : '');
   } catch (e) {
-    el('sortieBilan').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+    el('sortieBilan').innerHTML = `<p class="err">Échec : ${esc(e.message)}</p>`;
   }
 }
 
-// ------------------------------------------------------- réseau entre opticiens (module 3)
+// ------------------------------------------------------- réseau entre opticiens
 // Les jetons sont gardés dans ce navigateur pour permettre la bascule entre boutiques pendant
-// la démonstration. C'est commode à montrer et insuffisant en vrai : un jeton en localStorage
-// est lisible par tout script de la page. Voir l'avertissement en tête de reseau.py.
+// la démonstration. Commode à montrer, insuffisant en vrai : voir l'en-tête de reseau.py.
 let boutiques = JSON.parse(localStorage.getItem('opti_boutiques') || '[]');
 let conversationOuverte = null;
 
@@ -498,28 +639,35 @@ const entete = () => ({ 'X-Boutique-Jeton': active().jeton });
 async function inscrire() {
   const nom = el('nomBoutique').value.trim();
   if (nom.length < 2) { alert('Indiquez le nom de la boutique.'); return; }
-  const params = new URLSearchParams({ nom, ville: el('villeBoutique').value.trim() });
   try {
-    const r = await fetch(api() + '/reseau/inscription?' + params, { method: 'POST' });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    boutiques.push(await r.json());
+    const d = await fetch(api() + '/reseau/inscription?' + new URLSearchParams(
+      { nom, ville: el('villeBoutique').value.trim() }), { method: 'POST' })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    boutiques.push(d);
     localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
     el('nomBoutique').value = el('villeBoutique').value = '';
-    el('reseauInscription').hidden = true;
-    majBoutiques(boutiques[boutiques.length - 1].boutique);
-  } catch (e) {
-    alert('Inscription impossible : ' + e.message);
-  }
+    majBoutiques(d.boutique);
+  } catch (e) { alert('Inscription impossible : ' + e.message); }
 }
 
 function majBoutiques(choisie) {
-  const select = el('boutiqueActive');
-  select.innerHTML = '';
-  boutiques.forEach(b => select.add(new Option(b.nom + (b.ville ? ' — ' + b.ville : ''), b.boutique)));
-  if (choisie) select.value = choisie;
+  const s = el('boutiqueActive');
+  s.innerHTML = '';
+  boutiques.forEach(b => s.add(new Option(b.nom + (b.ville ? ' — ' + b.ville : ''), b.boutique)));
+  if (choisie) s.value = choisie;
   el('reseauConnecte').hidden = boutiques.length === 0;
   el('reseauInscription').hidden = boutiques.length > 0;
   if (boutiques.length) changerBoutique();
+}
+
+/** Un jeton peut ne plus rien valoir côté serveur -- données réinitialisées. Sans ce filet,
+ *  toutes les requêtes répondraient 401 et l'interface resterait muette. */
+function jetonPerime() {
+  const perdue = active();
+  boutiques = boutiques.filter(b => b.boutique !== perdue.boutique);
+  localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
+  majBoutiques();
+  alert(`« ${perdue.nom} » n'est plus reconnue par le serveur. Inscrivez-la à nouveau.`);
 }
 
 async function changerBoutique() {
@@ -528,172 +676,119 @@ async function changerBoutique() {
   await Promise.all([monStock(), mesEchanges()]);
 }
 
-/** Un jeton peut ne plus rien valoir côté serveur -- journal recréé, volume non monté. Sans
- *  ce filet, toutes les requêtes répondraient 401 et l'interface resterait muette. */
-function jetonPerime() {
-  const perdue = active();
-  boutiques = boutiques.filter(b => b.boutique !== perdue.boutique);
-  localStorage.setItem('opti_boutiques', JSON.stringify(boutiques));
-  majBoutiques();
-  alert(`La boutique « ${perdue.nom} » n'est plus reconnue par le serveur (données ` +
-        `réinitialisées). Inscrivez-la à nouveau.`);
-}
-
 async function monStock() {
   try {
     const r = await fetch(api() + '/reseau/mon-stock', { headers: entete() });
     if (r.status === 401) { jetonPerime(); return; }
     const d = await r.json();
-    if (!d.montures || !d.montures.length) {
-      el('monStock').innerHTML = `<p class="aide">Aucune monture partageable : renseignez d'abord
-        les marques dans <code>data/montures.csv</code>.</p>`;
-      return;
-    }
-    el('monStock').innerHTML = `
-      <div style="max-height:170px;overflow:auto;border:1px solid var(--trait);border-radius:7px;padding:8px">
-        ${d.montures.map(m => `<label style="display:block;color:var(--encre)">
-            <input type="checkbox" class="aPartager" value="${m.libelle}" ${m.partagee ? 'checked' : ''}>
-            ${m.marque}${m.reference ? ' ' + m.reference : ''}
-            <span class="aide">(${m.libelle})</span></label>`).join('')}
+    const deja = new Set(d.montures.filter(m => m.partagee).map(m => m.libelle));
+    el('monStock').innerHTML = d.montures.length ? `
+      <div style="max-height:190px;overflow:auto">
+        ${d.montures.map(m => `<label class="ligne" style="cursor:pointer">
+          <input type="checkbox" class="aPartager" value="${esc(m.libelle)}"
+                 style="width:22px;height:22px;flex:none" ${deja.has(m.libelle) ? 'checked' : ''}>
+          <div class="txt"><div class="nom">${esc(m.marque)} ${esc(m.reference || '')}</div>
+            <div class="meta">${m.quantite} en rayon</div></div></label>`).join('')}
       </div>
-      <p><button style="padding:5px 12px;font-size:.87rem" onclick="enregistrerPartage()">Enregistrer</button>
-         <span id="etatPartage" class="aide"></span></p>`;
-  } catch (e) {
-    el('monStock').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
-  }
+      <button class="petit" style="width:100%;margin-top:10px" onclick="enregistrerPartage()">
+        Enregistrer</button><span id="etatPartage" class="aide"></span>`
+      : `<p class="aide">Rien à proposer : entrez d'abord des montures en stock.</p>`;
+  } catch (e) { el('monStock').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 async function enregistrerPartage() {
-  const params = new URLSearchParams();
-  document.querySelectorAll('.aPartager:checked').forEach(c => params.append('montures', c.value));
-  try {
-    const r = await fetch(api() + '/reseau/partage?' + params, { method: 'POST', headers: entete() });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    el('etatPartage').textContent = (await r.json()).partagees + ' monture(s) proposée(s) au réseau';
-  } catch (e) {
-    el('etatPartage').innerHTML = '<span class="erreur">Échec : ' + e.message + '</span>';
-  }
+  const p = new URLSearchParams();
+  document.querySelectorAll('.aPartager:checked').forEach(c => p.append('montures', c.value));
+  const r = await fetch(api() + '/reseau/partage?' + p, { method: 'POST', headers: entete() });
+  el('etatPartage').textContent = r.ok
+    ? (await r.json()).partagees + ' monture(s) proposée(s)' : 'échec';
 }
 
-async function chercherReseau(marque, reference) {
-  if (marque !== undefined) { el('marqueReseau').value = marque; el('refReseau').value = reference || ''; }
-  const params = new URLSearchParams({ marque: el('marqueReseau').value,
-                                        reference: el('refReseau').value.trim() });
+async function chercherReseau(marque) {
+  if (marque !== undefined) el('marqueReseau').value = marque;
+  const p = new URLSearchParams({ marque: el('marqueReseau').value,
+                                   reference: el('refReseau').value.trim() });
   if (!el('marqueReseau').value && !el('refReseau').value.trim()) {
-    el('sortieReseau').innerHTML = '<p class="erreur">Choisissez au moins une marque.</p>'; return;
+    el('sortieReseau').innerHTML = '<p class="err">Choisissez au moins une marque.</p>'; return;
   }
   try {
-    const r = await fetch(api() + '/reseau/chercher?' + params, { headers: entete() });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const trouves = await r.json();
-    el('sortieReseau').innerHTML = trouves.length
-      ? trouves.map(t => `
-          <div class="bandeau fiable">
-            <strong>${t.marque}${t.reference ? ' ' + t.reference : ''}</strong>
-            disponible chez <strong>${t.nom}</strong>${t.ville ? ' — ' + t.ville : ''}
-            <button style="padding:4px 10px;font-size:.85rem;margin-left:8px"
-              onclick="ecrireA('${t.boutique}','${t.nom.replace(/'/g, "\\'")}',
-                               '${(t.marque + ' ' + (t.reference || '')).trim()}')">Écrire</button>
-          </div>`).join('')
-      : `<p class="aide">Personne ne propose cette monture pour l'instant. Le réseau ne montre
-         que ce que les confrères ont explicitement accepté de partager.</p>`;
-  } catch (e) {
-    el('sortieReseau').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
-  }
+    const t = await fetch(api() + '/reseau/chercher?' + p, { headers: entete() })
+      .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); });
+    el('sortieReseau').innerHTML = t.length ? t.map(x => `
+      <div class="bandeau ok"><strong>${esc(x.marque)} ${esc(x.reference || '')}</strong>
+        chez <strong>${esc(x.nom)}</strong>${x.ville ? ' — ' + esc(x.ville) : ''}
+        (${x.quantite} dispo)
+        <button class="petit" style="margin-top:8px;width:100%"
+          onclick="ecrireA('${esc(x.boutique)}','${esc(x.nom)}','${esc((x.marque + ' ' + (x.reference || '')).trim())}')">
+          Écrire</button></div>`).join('')
+      : `<p class="aide">Personne ne propose cette monture. Le réseau ne montre que ce que les
+         confrères ont accepté de partager, et qu'ils ont encore en rayon.</p>`;
+  } catch (e) { el('sortieReseau').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 function ecrireA(boutique, nom, monture) {
-  el('sortieReseau').innerHTML = `
-    <div class="bandeau doute">
-      <p style="margin:0 0 8px">À <strong>${nom}</strong> — au sujet de <strong>${monture}</strong></p>
-      <textarea id="texteDemande" rows="3" style="width:100%;padding:6px;border-radius:6px;
-        border:1px solid var(--trait);background:var(--champ);color:var(--encre);font-family:inherit"
-        >Bonjour, un client cherche cette monture. Est-elle encore disponible ?</textarea>
-      <p style="margin:8px 0 0"><button style="padding:5px 12px;font-size:.87rem"
-         onclick="envoyerDemande('${boutique}','${monture.replace(/'/g, "\\'")}')">Envoyer</button></p>
-    </div>`;
+  el('sortieReseau').innerHTML = `<div class="bandeau doute">
+    <p style="margin:0 0 8px">À <strong>${esc(nom)}</strong> — ${esc(monture)}</p>
+    <textarea id="texteDemande" rows="3">Bonjour, un client cherche cette monture. Est-elle encore disponible ?</textarea>
+    <button class="primaire" style="margin-top:8px"
+      onclick="envoyerDemande('${esc(boutique)}','${esc(monture)}')">Envoyer</button></div>`;
 }
 
 async function envoyerDemande(boutique, monture) {
-  const params = new URLSearchParams({ boutique_sollicitee: boutique, monture,
-                                        texte: el('texteDemande').value });
+  const p = new URLSearchParams({ boutique_sollicitee: boutique, monture,
+                                   texte: el('texteDemande').value });
   try {
-    const r = await fetch(api() + '/reseau/demande?' + params, { method: 'POST', headers: entete() });
-    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
-    conversationOuverte = (await r.json()).conversation;
-    el('sortieReseau').innerHTML = '<p class="aide">Message envoyé. La suite se passe dans « Mes échanges ».</p>';
+    const d = await fetch(api() + '/reseau/demande?' + p, { method: 'POST', headers: entete() })
+      .then(async r => { if (!r.ok) throw new Error((await r.json()).detail || r.status);
+                          return r.json(); });
+    conversationOuverte = d.conversation;
+    el('sortieReseau').innerHTML = '<p class="aide">Message envoyé — voir « Mes échanges ».</p>';
     await mesEchanges();
-    await ouvrirConversation(conversationOuverte);
-  } catch (e) {
-    el('sortieReseau').innerHTML = '<p class="erreur">Envoi impossible : ' + e.message + '</p>';
-  }
+  } catch (e) { el('sortieReseau').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 async function mesEchanges() {
   try {
-    const reponse = await fetch(api() + '/reseau/conversations', { headers: entete() });
-    if (reponse.status === 401) { jetonPerime(); return; }
-    const fils = await reponse.json();
-    el('sortieMessages').innerHTML = fils.length
-      ? fils.map(f => `<p class="aide" style="margin:4px 0">
-          <button style="padding:4px 10px;font-size:.85rem"
-            onclick="ouvrirConversation('${f.conversation}')">${f.interlocuteur}</button>
-          ${f.monture ? '<strong>' + f.monture + '</strong> — ' : ''}${f.dernier || 'pas encore de message'}
-          </p>`).join('') + '<div id="filOuvert"></div>'
-      : '<p class="aide">Aucun échange pour l\'instant.</p><div id="filOuvert"></div>';
+    const r = await fetch(api() + '/reseau/conversations', { headers: entete() });
+    if (r.status === 401) { jetonPerime(); return; }
+    const fils = await r.json();
+    el('sortieMessages').innerHTML = (fils.length ? fils.map(f => `
+      <div class="ligne"><div class="txt">
+        <div class="nom">${esc(f.interlocuteur)}</div>
+        <div class="meta">${esc(f.monture || '')} ${esc(f.dernier || 'pas de message')}</div>
+      </div><button class="petit" onclick="ouvrirConversation('${f.conversation}')">Ouvrir</button>
+      </div>`).join('') : '<p class="aide">Aucun échange.</p>') + '<div id="filOuvert"></div>';
     if (conversationOuverte) await ouvrirConversation(conversationOuverte);
-  } catch (e) {
-    el('sortieMessages').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
-  }
+  } catch (e) { el('sortieMessages').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
-async function ouvrirConversation(conversation) {
-  conversationOuverte = conversation;
+async function ouvrirConversation(c) {
+  conversationOuverte = c;
   try {
-    const d = await fetch(api() + '/reseau/conversation/' + conversation,
-                          { headers: entete() }).then(r => r.json());
-    el('filOuvert').innerHTML = `
-      <div style="border:1px solid var(--trait);border-radius:8px;padding:10px;margin-top:8px">
-        ${d.messages.map(m => `<p style="margin:3px 0;font-size:.9rem">
-            <strong style="color:${m.auteur === d.moi ? 'var(--vert)' : 'var(--gris)'}">${m.nom}</strong> :
-            ${m.texte}</p>`).join('') || '<p class="aide">Fil vide.</p>'}
-        <p style="margin:10px 0 0">
-          <input type="text" id="reponse" placeholder="Votre réponse" style="width:70%"
-                 onkeydown="if(event.key==='Enter')repondre()">
-          <button style="padding:5px 12px;font-size:.87rem" onclick="repondre()">Répondre</button></p>
-        <p class="aide" style="margin:6px 0 0">
-          <button style="padding:3px 8px;font-size:.8rem" onclick="signaler()">Signaler</button></p>
-      </div>`;
-  } catch (e) {
-    el('filOuvert').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
-  }
+    const d = await fetch(api() + '/reseau/conversation/' + c, { headers: entete() })
+      .then(r => r.json());
+    el('filOuvert').innerHTML = `<div style="border-top:1px solid var(--trait);margin-top:10px;padding-top:10px">
+      ${d.messages.map(m => `<p style="margin:5px 0;font-size:.9rem">
+        <strong style="color:${m.auteur === d.moi ? 'var(--accent)' : 'var(--doux)'}">${esc(m.nom)}</strong> :
+        ${esc(m.texte)}</p>`).join('') || '<p class="aide">Fil vide.</p>'}
+      <input type="text" id="reponse" placeholder="Votre réponse" style="margin-top:8px"
+             onkeydown="if(event.key==='Enter')repondre()">
+      <button class="petit" style="width:100%;margin-top:8px" onclick="repondre()">Répondre</button>
+    </div>`;
+  } catch (e) { el('filOuvert').innerHTML = `<p class="err">${esc(e.message)}</p>`; }
 }
 
 async function repondre() {
-  const texte = el('reponse').value.trim();
-  if (!texte) return;
-  const url = api() + '/reseau/conversation/' + conversationOuverte + '/message?texte=' +
-              encodeURIComponent(texte);
-  try {
-    const r = await fetch(url, { method: 'POST', headers: entete() });
-    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
-    await mesEchanges();
-  } catch (e) {
-    alert('Envoi impossible : ' + e.message);
-  }
-}
-
-async function signaler() {
-  const motif = prompt('Motif du signalement ?');
-  if (!motif) return;
-  await fetch(api() + '/reseau/signaler?conversation=' + conversationOuverte +
-              '&motif=' + encodeURIComponent(motif), { method: 'POST', headers: entete() });
-  alert('Signalement enregistré.');
+  const t = el('reponse').value.trim();
+  if (!t) return;
+  const r = await fetch(api() + '/reseau/conversation/' + conversationOuverte +
+    '/message?texte=' + encodeURIComponent(t), { method: 'POST', headers: entete() });
+  if (!r.ok) { alert((await r.json()).detail || 'Impossible'); return; }
+  await mesEchanges();
 }
 
 connecter();
 majBoutiques();
-chargerStock();
 </script>
 </body>
 </html>

@@ -41,6 +41,7 @@ from journal import Journal, chronometre
 import metadonnees
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, charger_backbone
+from fiches import Fiches
 from reseau import Reseau
 from stock import Stock
 
@@ -289,6 +290,9 @@ RESEAU = Reseau(_DONNEES / "reseau.jsonl")
 # Le stock est la donnée métier de la boutique : sa perte coûterait plus cher que celle du
 # modèle, qui se reconstruit. Même volume persistant, pour la même raison.
 STOCK = Stock(_DONNEES / "stock.jsonl")
+# Montures saisies au comptoir, absentes du catalogue entraîné. Même volume persistant : ce
+# sont des données métier, et leurs photos nourriront un réentraînement plus tard.
+FICHES = Fiches(_DONNEES)
 
 
 @asynccontextmanager
@@ -382,6 +386,13 @@ def route_photo_monture(request: Request, label: str) -> FileResponse:
     étiquettes du catalogue, et on sert alors un chemin établi côté serveur. Une valeur
     fantaisiste, y compris une tentative de remontée de dossier, ne correspond à aucune
     étiquette et reçoit un 404."""
+    # Monture saisie au comptoir : sa photo est rangée sous son identifiant, lui-même produit
+    # par le serveur. Aucune valeur venue du client ne compose le chemin.
+    if label.startswith("f_"):
+        if (photo := FICHES.photo(label)) is None:
+            raise HTTPException(status_code=404, detail=f"Aucune photo pour {label}")
+        return FileResponse(photo, media_type="image/jpeg")
+
     m = _modeles(request)
     if label not in {str(l) for l in m.labels_catalogue}:
         raise HTTPException(status_code=404, detail=f"Monture {label} inconnue")
@@ -459,6 +470,73 @@ def route_inventaire_cloturer(session: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
+# Saisie d'une monture au comptoir (module 1)
+#
+# Le parcours qui ne dépend d'aucun modèle : photographier la monture, renseigner sa marque et
+# sa référence -- à la main ou dictées par l'OCR de l'étiquette -- et l'entrer en stock. Il
+# fonctionne donc sur n'importe quelle monture, y compris celles qu'aucun catalogue ne connaît.
+# ---------------------------------------------------------------------------
+
+
+@app.post("/monture")
+async def route_creer_monture(
+    photo: UploadFile | None = File(None, description="Photo de la monture"),
+    marque: str = Query(..., min_length=1, max_length=80),
+    reference: str = Query("", max_length=80),
+    coloris: str = Query("", max_length=40),
+    calibre: str = Query("", max_length=20),
+    pont: str = Query("", max_length=20),
+    branche: str = Query("", max_length=20),
+    quantite: int = Query(1, ge=0, le=999, description="0 pour créer la fiche sans stock"),
+    emplacement: str = Query("", max_length=80),
+) -> dict:
+    """Crée la fiche d'une monture et l'entre en stock dans la foulée.
+
+    Les deux gestes sont réunis parce qu'au comptoir ils n'en font qu'un : on ne saisit une
+    monture que parce qu'on vient de la recevoir. `quantite=0` permet quand même de créer la
+    fiche seule, par exemple pour préparer un réassort.
+    """
+    donnees = await photo.read() if photo is not None else None
+    if donnees:
+        _lire_image_uploadee(donnees)   # rejette tout de suite un fichier qui n'est pas une image
+
+    try:
+        fiche = FICHES.creer({"marque": marque, "reference": reference, "coloris": coloris,
+                               "calibre": calibre, "pont": pont, "branche": branche}, donnees)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    etat = {"monture": fiche["monture"], "quantite": 0, "emplacement": ""}
+    if quantite:
+        etat = STOCK.entrer(fiche["monture"], quantite, emplacement, motif="reception")
+    return {"fiche": fiche, "libelle": FICHES.libelle(fiche["monture"]), "stock": etat}
+
+
+@app.get("/monture")
+def route_fiches(q: str = Query("", max_length=80, description="Recherche libre")) -> list[dict]:
+    """Fiches saisies, avec leur quantité en rayon."""
+    etats = STOCK.etat()
+    return [{**f, "libelle": FICHES.libelle(f["monture"]),
+             "quantite": etats.get(f["monture"], {}).get("quantite", 0),
+             "emplacement": etats.get(f["monture"], {}).get("emplacement", "")}
+            for f in FICHES.chercher(q)]
+
+
+@app.patch("/monture/{monture}")
+def route_modifier_fiche(monture: str,
+                          marque: str | None = Query(None, max_length=80),
+                          reference: str | None = Query(None, max_length=80),
+                          coloris: str | None = Query(None, max_length=40),
+                          calibre: str | None = Query(None, max_length=20)) -> dict:
+    champs = {c: v for c, v in (("marque", marque), ("reference", reference),
+                                 ("coloris", coloris), ("calibre", calibre)) if v is not None}
+    try:
+        return FICHES.modifier(monture, champs)
+    except KeyError:
+        raise HTTPException(status_code=404, detail=f"Fiche {monture} inconnue")
+
+
+# ---------------------------------------------------------------------------
 # Stock : ce qu'il y a en rayon, et où (module 1)
 # ---------------------------------------------------------------------------
 
@@ -471,8 +549,20 @@ def route_stock(request: Request) -> dict:
     if m.marques_catalogue is not None:
         marques = {str(l): str(mq).strip()
                    for l, mq in zip(m.labels_catalogue, m.marques_catalogue)}
-    lignes = [{**e, "marque": marques.get(monture, "")}
-              for monture, e in sorted(STOCK.etat().items())]
+
+    fiches = FICHES.toutes()
+    references = _references_catalogue()
+    lignes = []
+    for monture, e in sorted(STOCK.etat().items()):
+        fiche = fiches.get(monture, {})
+        marque = fiche.get("marque") or marques.get(monture, "")
+        reference = fiche.get("reference") or references.get(monture, "")
+        # En rayon, personne ne reconnaît « f_a1b2c3 » ni « 18 » : on affiche ce qui est écrit
+        # sur la monture, et l'identifiant seulement à défaut.
+        libelle = " ".join(x for x in (marque, reference or
+                                        (monture if monture not in fiches else "")) if x)
+        lignes.append({**e, "marque": marque, "reference": reference,
+                        "libelle": libelle or monture, "saisie": monture in fiches})
     return {"lignes": lignes, "bilan": STOCK.bilan()}
 
 

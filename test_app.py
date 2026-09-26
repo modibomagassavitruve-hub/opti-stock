@@ -718,3 +718,121 @@ def test_route_seuil_mesure_le_seuil_en_service(client, tmp_path, monkeypatch):
     d = client.get("/journal/seuil").json()
     assert d["validations"] == 2
     assert d["reel_au_seuil_actuel"]["precision"] == 0.5
+
+
+# ------------------------------------------------- saisie d'une monture au comptoir
+@pytest.fixture()
+def comptoir(client, tmp_path, monkeypatch):
+    from fiches import Fiches
+    from stock import Stock
+    monkeypatch.setattr(app_module, "FICHES", Fiches(tmp_path / "f"))
+    monkeypatch.setattr(app_module, "STOCK", Stock(tmp_path / "stock.jsonl"))
+    client.app.state.modeles = _modeles_avec_marques()
+    return client
+
+
+def test_creer_une_monture_inconnue_du_catalogue(comptoir):
+    """Le parcours du Silmo : une monture qu'aucun modèle n'a vue doit pouvoir entrer en stock."""
+    r = comptoir.post("/monture?marque=OCTIKA&reference=OS866&quantite=2&emplacement=vitrine",
+                       files={"photo": ("m.jpg", _fichier_image_valide(), "image/jpeg")})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["libelle"] == "OCTIKA OS866"
+    assert d["stock"]["quantite"] == 2
+    assert d["fiche"]["monture"].startswith("f_")
+
+
+def test_la_monture_saisie_apparait_au_stock_avec_son_libelle(comptoir):
+    """En rayon, personne ne reconnaît « f_a1b2c3 » : c'est « OCTIKA OS866 » qu'il faut lire."""
+    comptoir.post("/monture?marque=OCTIKA&reference=OS866&quantite=1")
+    ligne = [l for l in comptoir.get("/stock").json()["lignes"] if l["saisie"]][0]
+    assert ligne["libelle"] == "OCTIKA OS866"
+    assert ligne["quantite"] == 1
+
+
+def test_creer_sans_photo(comptoir):
+    """Au comptoir on n'a pas toujours le temps : la photo ne doit pas bloquer la saisie."""
+    assert comptoir.post("/monture?marque=OCTIKA&quantite=1").status_code == 200
+
+
+def test_creer_sans_marque_refuse(comptoir):
+    assert comptoir.post("/monture?reference=OS866").status_code == 422
+
+
+def test_fichier_non_image_refuse(comptoir):
+    r = comptoir.post("/monture?marque=A",
+                       files={"photo": ("notes.txt", b"pas une image", "text/plain")})
+    assert r.status_code == 400
+
+
+def test_quantite_zero_cree_la_fiche_sans_stock(comptoir):
+    d = comptoir.post("/monture?marque=OCTIKA&quantite=0").json()
+    assert d["stock"]["quantite"] == 0
+    assert comptoir.get("/monture").json()[0]["quantite"] == 0
+
+
+def test_photo_de_la_monture_saisie_servie(comptoir):
+    d = comptoir.post("/monture?marque=A",
+                       files={"photo": ("m.jpg", _fichier_image_valide(), "image/jpeg")}).json()
+    r = comptoir.get(f"/monture/{d['fiche']['monture']}/photo")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+
+
+def test_photo_absente_donne_404(comptoir):
+    d = comptoir.post("/monture?marque=A").json()
+    assert comptoir.get(f"/monture/{d['fiche']['monture']}/photo").status_code == 404
+
+
+def test_identifiant_fantaisiste_ne_sert_aucun_fichier(comptoir):
+    """Le chemin n'est jamais composé avec une valeur du client."""
+    assert comptoir.get("/monture/f_..%2F..%2Fetc%2Fpasswd/photo").status_code == 404
+
+
+def test_rechercher_une_fiche(comptoir):
+    comptoir.post("/monture?marque=OCTIKA&reference=OS866")
+    comptoir.post("/monture?marque=RAY-BAN&reference=RB3025")
+    assert len(comptoir.get("/monture?q=octika").json()) == 1
+    assert len(comptoir.get("/monture").json()) == 2
+
+
+def test_corriger_une_fiche(comptoir):
+    """Une faute de frappe au comptoir doit se rattraper sans tout ressaisir."""
+    d = comptoir.post("/monture?marque=OCTKA").json()
+    r = comptoir.patch(f"/monture/{d['fiche']['monture']}?marque=OCTIKA&reference=OS866")
+    assert r.status_code == 200
+    assert comptoir.get("/monture").json()[0]["libelle"] == "OCTIKA OS866"
+
+
+def test_corriger_une_fiche_inconnue(comptoir):
+    assert comptoir.patch("/monture/f_rien?marque=A").status_code == 404
+
+
+def test_monture_saisie_comptable_en_inventaire(comptoir, tmp_path, monkeypatch):
+    """Une monture saisie au comptoir doit entrer dans l'inventaire comme les autres."""
+    from inventaire import Inventaire
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+    monture = comptoir.post("/monture?marque=OCTIKA&quantite=3").json()["fiche"]["monture"]
+
+    sid = comptoir.post("/inventaire?libelle=silmo").json()["session"]
+    etat = comptoir.post(f"/inventaire/{sid}/compter?monture={monture}&quantite=2").json()
+    assert etat["manquantes"][0]["ecart"] == -1
+
+
+def test_le_stock_affiche_ce_qui_est_ecrit_sur_la_monture(comptoir, monkeypatch):
+    """En rayon on ne reconnaît ni « f_a1b2c3 » ni « 18 » : il faut lire la marque."""
+    monkeypatch.setattr(app_module, "_references_catalogue", lambda: {"m1": "OS866"})
+    comptoir.post("/stock/m1/entree?quantite=1")
+    comptoir.post("/monture?marque=SILHOUETTE&reference=5515&quantite=2")
+
+    par_monture = {l["monture"]: l for l in comptoir.get("/stock").json()["lignes"]}
+    assert par_monture["m1"]["libelle"] == "Osmose OS866"
+    saisie = [l for l in par_monture.values() if l["saisie"]][0]
+    assert saisie["libelle"] == "SILHOUETTE 5515"
+
+
+def test_monture_du_catalogue_sans_reference_garde_son_identifiant(comptoir, monkeypatch):
+    """Sans référence, l'identifiant reste le seul repère : il ne doit pas disparaître."""
+    monkeypatch.setattr(app_module, "_references_catalogue", lambda: {})
+    comptoir.post("/stock/m1/entree?quantite=1")
+    ligne = [l for l in comptoir.get("/stock").json()["lignes"] if l["monture"] == "m1"][0]
+    assert ligne["libelle"] == "Osmose m1"
