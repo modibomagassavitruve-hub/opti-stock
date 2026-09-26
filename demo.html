@@ -89,9 +89,22 @@
 </section>
 
 <section>
+  <h2>Mon stock</h2>
+  <p class="aide">Ce qu'il y a en rayon, et où. C'est ce que l'inventaire compare, et ce que
+     le réseau propose aux confrères — une monture épuisée n'y apparaît plus.</p>
+  <p><button onclick="chargerStock()">Rafraîchir</button>
+     <label style="margin-left:10px">Voir <select id="filtreStock" onchange="chargerStock()">
+       <option value="rayon">en rayon</option>
+       <option value="tout">tout, épuisées comprises</option>
+     </select></label></p>
+  <div id="sortieStock"></div>
+</section>
+
+<section>
   <h2>Inventaire</h2>
-  <p class="aide">Parcourez les rayons et pointez chaque monture. Ce qui compte à la fin, ce
-     n'est pas la liste de ce que vous avez trouvé, mais celle de ce qui manque.</p>
+  <p class="aide">Parcourez les rayons et comptez chaque monture. Ce qui compte à la fin n'est
+     pas ce que vous avez trouvé, mais l'<strong>écart</strong> : combien il devrait y en
+     avoir, combien il y en a. La clôture corrige le stock — le rayon fait foi.</p>
   <div id="inventaireBarre">
     <input type="text" id="libelleInv" placeholder="ex. 2026" size="10">
     <button onclick="demarrerInventaire()">Démarrer un inventaire</button>
@@ -248,8 +261,18 @@ async function valider(carte, monture) {
                             '/compter?monture=' + encodeURIComponent(monture), { method: 'POST' });
       if (r.ok) { pointee = ' et pointé dans l\'inventaire'; await rafraichirInventaire(); }
     }
+    // Hors inventaire, le geste suivant est d'entrer la monture en stock : sans ça
+    // l'identification ne débouchait sur rien.
+    const entree = (monture && !inventaireEnCours) ? `
+      <p class="aide" style="margin-top:8px">Entrer en stock :
+         <input type="number" id="qteEntree" value="1" min="1" max="99" style="width:3.5em">
+         <input type="text" id="emplacementEntree" placeholder="emplacement" size="12">
+         <button style="padding:4px 10px;font-size:.85rem"
+            onclick="entrerEnStock('${monture}')">Entrer</button></p>` : '';
+
     el('confirmation').innerHTML = '<p class="aide">' +
-      (monture ? 'Enregistré : ' + monture + pointee : 'Enregistré : aucune correspondance') + '.</p>';
+      (monture ? 'Enregistré : ' + monture + pointee : 'Enregistré : aucune correspondance') +
+      '.</p>' + entree;
   } catch (e) {
     el('confirmation').innerHTML = '<p class="erreur">Enregistrement impossible : ' + e.message + '</p>';
   }
@@ -278,6 +301,59 @@ async function lireEtiquette() {
   }
 }
 
+// ----------------------------------------------------------------------- stock
+async function chargerStock() {
+  try {
+    const d = await fetch(api() + '/stock').then(r => r.json());
+    const tout = el('filtreStock').value === 'tout';
+    const lignes = d.lignes.filter(l => tout || l.quantite > 0);
+
+    el('sortieStock').innerHTML = `
+      <p class="aide">${d.bilan.pieces} pièces, ${d.bilan.references_en_stock} références en
+         rayon${d.bilan.epuisees.length ? `, ${d.bilan.epuisees.length} épuisée(s)` : ''}.</p>
+      ${lignes.length ? `<table>
+        ${lignes.map(l => `<tr>
+          <td>${l.marque ? '<strong>' + l.marque + '</strong> ' : ''}${l.monture}</td>
+          <td>${l.emplacement || '—'}</td>
+          <td><strong style="color:${l.quantite ? 'var(--vert)' : 'var(--gris)'}">${l.quantite}</strong></td>
+          <td><button style="padding:2px 8px;font-size:.8rem"
+                onclick="mouvementStock('${l.monture}','sortie')">vendre</button>
+              <button style="padding:2px 8px;font-size:.8rem"
+                onclick="mouvementStock('${l.monture}','entree')">+1</button></td>
+        </tr>`).join('')}</table>`
+        : `<p class="aide">Rien en rayon. Identifiez une monture ci-dessus et entrez-la en stock.</p>`}`;
+  } catch (e) {
+    el('sortieStock').innerHTML = '<p class="erreur">Échec : ' + e.message + '</p>';
+  }
+}
+
+async function mouvementStock(monture, sens) {
+  const url = `${api()}/stock/${encodeURIComponent(monture)}/${sens}?quantite=1` +
+              (sens === 'sortie' ? '&motif=vente' : '');
+  const r = await fetch(url, { method: 'POST' });
+  if (!r.ok) { alert(((await r.json()).detail) || 'HTTP ' + r.status); return; }
+  await chargerStock();
+}
+
+/** Le maillon qui manquait : identifier une monture ne servait à rien tant qu'on ne pouvait
+ *  pas l'entrer en stock dans la foulée. */
+async function entrerEnStock(monture) {
+  const quantite = parseInt(el('qteEntree').value || '1', 10);
+  const emplacement = encodeURIComponent(el('emplacementEntree').value.trim());
+  const url = `${api()}/stock/${encodeURIComponent(monture)}/entree?quantite=${quantite}` +
+              `&emplacement=${emplacement}`;
+  try {
+    const r = await fetch(url, { method: 'POST' });
+    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
+    const d = await r.json();
+    el('confirmation').innerHTML = `<p class="aide">Entrée en stock : <strong>${monture}</strong>,
+      ${d.quantite} en rayon${d.emplacement ? ' — ' + d.emplacement : ''}.</p>`;
+    await chargerStock();
+  } catch (e) {
+    el('confirmation').innerHTML = '<p class="erreur">Entrée impossible : ' + e.message + '</p>';
+  }
+}
+
 // ------------------------------------------------------------------ inventaire
 let inventaireEnCours = null;
 
@@ -302,7 +378,7 @@ async function listerInventaires() {
   el('sortieInventaire').innerHTML = sessions.map(s => `
     <p class="aide"><button style="padding:4px 10px;font-size:.85rem"
        onclick="ouvrirInventaire('${s.session}')">${s.libelle || s.session}</button>
-       ${s.trouvees}/${s.attendues} pointées — ${s.statut}</p>`).join('');
+       ${s.pieces_comptees}/${s.pieces_attendues} pièces comptées — ${s.statut}</p>`).join('');
 }
 
 async function ouvrirInventaire(session) {
@@ -310,34 +386,49 @@ async function ouvrirInventaire(session) {
   await rafraichirInventaire();
 }
 
+/** Un écart, pas un décompte : « il m'en manque 2 sur 5 » est la phrase que l'inventaire doit
+ *  produire. Le détail par monture prime sur le total, qui peut masquer des écarts opposés. */
+function ligneEcart(l) {
+  return `<tr><td>${l.monture}</td><td>${l.comptee} / ${l.theorique}</td>
+          <td><strong style="color:${l.ecart < 0 ? 'var(--rouge)' : 'var(--vert)'}">
+          ${l.ecart > 0 ? '+' : ''}${l.ecart}</strong></td></tr>`;
+}
+
 async function rafraichirInventaire() {
   if (!inventaireEnCours) return;
   const e = await fetch(api() + '/inventaire/' + inventaireEnCours).then(r => r.json());
-  const reste = e.attendues - e.trouvees;
-  const anomalies = [];
-  if (e.hors_catalogue.length)
-    anomalies.push(`${e.hors_catalogue.length} monture(s) en rayon mais absente(s) du catalogue : ${e.hors_catalogue.join(', ')}`);
-  if (e.comptees_plusieurs_fois.length)
-    anomalies.push(`${e.comptees_plusieurs_fois.length} pointée(s) plusieurs fois : ${e.comptees_plusieurs_fois.join(', ')}`);
+  const juste = !e.manquantes.length && !e.en_trop.length;
 
   el('sortieInventaire').innerHTML = `
-    <div class="bandeau ${reste === 0 ? 'fiable' : 'doute'}">
-      <strong>${e.libelle || e.session}</strong> — ${e.trouvees} / ${e.attendues} pointées,
-      ${reste} restante(s). ${e.statut === 'clos' ? 'Inventaire clos.' : ''}
+    <div class="bandeau ${juste ? 'fiable' : 'doute'}">
+      <strong>${e.libelle || e.session}</strong> — ${e.pieces_comptees} pièces comptées sur
+      ${e.pieces_attendues} attendues.
+      ${juste ? 'Aucun écart.' : `${e.manquantes.length} référence(s) en moins,
+         ${e.en_trop.length} en plus.`}
+      ${e.statut === 'clos' ? ' Inventaire clos, stock corrigé.' : ''}
     </div>
-    ${anomalies.map(a => `<p class="aide">⚠ ${a}</p>`).join('')}
-    <p class="aide">Identifiez une monture ci-dessus, puis validez-la : elle sera pointée
+    ${e.hors_stock.length ? `<p class="aide">⚠ ${e.hors_stock.length} monture(s) en rayon mais
+       absente(s) du stock théorique : ${e.hors_stock.join(', ')}</p>` : ''}
+    <p class="aide">Identifiez une monture ci-dessus, puis validez-la : elle sera comptée
        automatiquement dans cet inventaire.</p>
-    ${e.manquantes.length ? `<details><summary class="aide" style="cursor:pointer">
-       Voir les ${e.manquantes.length} montures non trouvées</summary>
-       <p class="aide">${e.manquantes.join(', ')}</p></details>` : ''}
+    ${e.manquantes.length ? `<details open><summary class="aide" style="cursor:pointer">
+       ${e.manquantes.length} référence(s) manquante(s)</summary>
+       <table>${e.manquantes.map(ligneEcart).join('')}</table></details>` : ''}
+    ${e.en_trop.length ? `<details><summary class="aide" style="cursor:pointer">
+       ${e.en_trop.length} référence(s) en trop</summary>
+       <table>${e.en_trop.map(ligneEcart).join('')}</table></details>` : ''}
     ${e.statut === 'en_cours' ? `<button style="margin-top:10px"
-       onclick="cloturerInventaire()">Clôturer</button>` : ''}`;
+       onclick="cloturerInventaire()">Clôturer et corriger le stock</button>
+       <p class="aide">La clôture applique les quantités comptées au stock : le rayon fait
+          foi, et chaque correction garde sa trace.</p>` : ''}`;
 }
 
 async function cloturerInventaire() {
-  await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
+  if (!confirm('Clôturer applique les quantités comptées au stock. Continuer ?')) return;
+  const r = await fetch(api() + '/inventaire/' + inventaireEnCours + '/cloturer', { method: 'POST' });
+  if (!r.ok) { alert('Clôture impossible : ' + ((await r.json()).detail || r.status)); return; }
   await rafraichirInventaire();
+  await chargerStock();
 }
 
 async function bilan() {
@@ -569,6 +660,7 @@ async function signaler() {
 
 connecter();
 majBoutiques();
+chargerStock();
 </script>
 </body>
 </html>

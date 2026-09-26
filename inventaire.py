@@ -1,4 +1,4 @@
-"""Inventaire annuel : pointer le stock réel contre le catalogue (module 2 du schéma).
+"""Inventaire annuel : compter le rayon et le confronter au stock théorique (module 2).
 
 Différence de nature avec /identifier, qui commande la conception : ici la monture est
 forcément au catalogue, et l'opticien la tient en main. Ce n'est pas une identification mais
@@ -6,8 +6,13 @@ une CONFIRMATION -- la reconnaissance visuelle propose, l'humain valide d'un ges
 reconnaissance imparfaite reste donc utilisable, là où elle serait gênante pour une commande
 fournisseur.
 
-Ce que l'inventaire produit de précieux n'est pas la liste de ce qu'on a trouvé, mais celle de
-ce qu'on n'a PAS trouvé : montures disparues, vendues sans saisie, ou rangées ailleurs.
+Ce que l'inventaire produit de précieux n'est pas la liste de ce qu'on a trouvé, mais l'ÉCART :
+combien il devrait y en avoir, combien il y en a, et de combien on s'est trompé. Une version
+antérieure ne savait dire que « vue / pas vue », faute de quantité théorique à comparer --
+c'est le stock qui la fournit désormais.
+
+Clôturer applique les comptages au stock : c'est le sens d'un récolement, le rayon fait foi.
+Chaque correction passe par Stock.ajuster, qui en garde la trace et l'écart.
 
 Stockage : un JSONL par session, en ajout seul, comme le journal des prédictions. Chaque
 comptage est une ligne ; l'état se reconstruit en les relisant. Aucune écriture concurrente ne
@@ -44,35 +49,56 @@ class Inventaire:
         with open(self._fichier(session), "a", encoding="utf-8") as f:
             f.write(json.dumps({**ligne, "date": _horodatage()}, ensure_ascii=False) + "\n")
 
-    def demarrer(self, montures_attendues: list[str], libelle: str = "") -> str:
-        """Ouvre une session en figeant la liste attendue : le catalogue peut changer pendant
-        l'inventaire sans fausser le décompte."""
+    def demarrer(self, theorique: dict[str, int], libelle: str = "") -> str:
+        """Ouvre une session en figeant le stock théorique : il peut bouger pendant
+        l'inventaire (une vente, une réception) sans fausser la comparaison finale."""
         session = uuid.uuid4().hex[:8]
         self._ajouter(session, {"type": "ouverture", "libelle": libelle,
-                                 "attendues": sorted(set(montures_attendues))})
+                                 "theorique": {str(m): int(q) for m, q in theorique.items()}})
         return session
 
-    def compter(self, session: str, monture: str) -> dict:
+    def compter(self, session: str, monture: str, quantite: int = 1) -> dict:
         lignes = self._lignes(session)
         if not lignes:
             raise KeyError(f"Inventaire {session} inconnu")
         if self._statut(lignes) == "clos":
             raise ValueError(f"Inventaire {session} déjà clos")
-        self._ajouter(session, {"type": "comptage", "monture": monture})
+        if quantite < 1:
+            raise ValueError("Un comptage porte sur au moins une monture")
+        self._ajouter(session, {"type": "comptage", "monture": monture, "quantite": quantite})
         return self.etat(session)
 
-    def annuler_comptage(self, session: str, monture: str) -> dict:
+    def annuler_comptage(self, session: str, monture: str, quantite: int = 1) -> dict:
         """Retire un comptage. On ajoute une ligne d'annulation plutôt que d'en effacer une :
         le fichier reste en ajout seul, et l'historique des corrections reste lisible."""
         if not self._lignes(session):
             raise KeyError(f"Inventaire {session} inconnu")
-        self._ajouter(session, {"type": "annulation", "monture": monture})
+        self._ajouter(session, {"type": "annulation", "monture": monture,
+                                 "quantite": max(1, quantite)})
         return self.etat(session)
 
-    def cloturer(self, session: str) -> dict:
-        if not self._lignes(session):
+    def cloturer(self, session: str, stock=None) -> dict:
+        """Clôt la session et, si un stock est fourni, y applique les quantités comptées.
+
+        C'est le sens du récolement : le rayon fait foi. Les montures non comptées passent à
+        zéro -- ne pas les toucher laisserait le stock affirmer qu'elles sont là alors qu'on
+        vient de constater le contraire.
+        """
+        lignes = self._lignes(session)
+        if not lignes:
             raise KeyError(f"Inventaire {session} inconnu")
-        self._ajouter(session, {"type": "cloture"})
+        if self._statut(lignes) == "clos":
+            raise ValueError(f"Inventaire {session} déjà clos")
+
+        etat = self.etat(session)
+        if stock is not None:
+            for ligne in etat["lignes"]:
+                if ligne["ecart"]:
+                    stock.ajuster(ligne["monture"], ligne["comptee"],
+                                   motif=f"inventaire {etat['libelle'] or session}")
+
+        self._ajouter(session, {"type": "cloture", "corrigees": sum(
+            1 for l in etat["lignes"] if l["ecart"]) if stock is not None else 0})
         return self.etat(session)
 
     @staticmethod
@@ -84,26 +110,39 @@ class Inventaire:
         if not lignes:
             raise KeyError(f"Inventaire {session} inconnu")
 
-        attendues = set(lignes[0].get("attendues", []))
-        comptes: dict[str, int] = {}
+        theorique: dict[str, int] = dict(lignes[0].get("theorique", {}))
+        comptees: dict[str, int] = {}
         for l in lignes:
             if l["type"] == "comptage":
-                comptes[l["monture"]] = comptes.get(l["monture"], 0) + 1
+                comptees[l["monture"]] = comptees.get(l["monture"], 0) + l.get("quantite", 1)
             elif l["type"] == "annulation":
-                comptes[l["monture"]] = max(0, comptes.get(l["monture"], 0) - 1)
-        comptes = {m: n for m, n in comptes.items() if n > 0}
+                comptees[l["monture"]] = max(0, comptees.get(l["monture"], 0)
+                                              - l.get("quantite", 1))
 
-        trouvees = set(comptes)
+        detail = []
+        for monture in sorted(set(theorique) | set(comptees)):
+            attendue, comptee = theorique.get(monture, 0), comptees.get(monture, 0)
+            detail.append({"monture": monture, "theorique": attendue, "comptee": comptee,
+                            "ecart": comptee - attendue})
+
+        manquantes = [l for l in detail if l["ecart"] < 0]
+        en_trop = [l for l in detail if l["ecart"] > 0]
         return {
             "session": session,
             "libelle": lignes[0].get("libelle", ""),
             "statut": self._statut(lignes),
             "demarre_le": lignes[0]["date"],
-            "attendues": len(attendues),
-            "trouvees": len(trouvees & attendues),
-            "manquantes": sorted(attendues - trouvees),
-            "hors_catalogue": sorted(trouvees - attendues),
-            "comptees_plusieurs_fois": sorted(m for m, n in comptes.items() if n > 1),
+            "references_attendues": sum(1 for q in theorique.values() if q > 0),
+            "pieces_attendues": sum(theorique.values()),
+            "pieces_comptees": sum(comptees.values()),
+            "references_comptees": sum(1 for q in comptees.values() if q > 0),
+            # Les deux listes qui font l'intérêt de l'inventaire : ce qui manque, et ce qui est
+            # là sans être au stock (retours non saisis, erreurs de rangement, vols rendus).
+            "manquantes": manquantes,
+            "en_trop": en_trop,
+            "hors_stock": sorted(l["monture"] for l in detail if l["theorique"] == 0
+                                  and l["comptee"] > 0),
+            "lignes": detail,
         }
 
     def sessions(self) -> list[dict]:

@@ -13,9 +13,13 @@ uvicorn app:app --port 8000     # puis ouvrir http://localhost:8000
 **Identifier une monture.** Photographier, choisir la marque si elle est connue, valider la
 bonne proposition d'un clic. Préciser la marque fait passer le recall@5 de 0.79 à 0.86.
 
-**Inventaire.** Démarrer une session, parcourir les rayons, identifier chaque monture : la
-validation la pointe automatiquement. À la fin, la liste des montures **non trouvées** —
-disparues, vendues sans saisie, ou rangées ailleurs.
+**Entrer en stock.** Après validation, la monture s'entre en rayon avec sa quantité et son
+emplacement. C'est ce qui fait de l'identification autre chose qu'une curiosité : sans stock,
+elle ne débouchait sur rien.
+
+**Inventaire.** Démarrer une session, parcourir les rayons, compter. À la fin, l'**écart** :
+combien il devrait y en avoir, combien il y en a, référence par référence. Clôturer applique
+les comptages au stock — le rayon fait foi, et chaque correction garde sa trace et son écart.
 
 **Fiabilité constatée.** Chaque validation alimente un journal. C'est la seule mesure prise
 dans vos conditions réelles ; tous les autres chiffres de ce document viennent de photos
@@ -25,6 +29,10 @@ prises en une seule séance, et sont donc optimistes.
 inscrit et écrivez-lui directement. Vous choisissez monture par monture ce que vous exposez ;
 le reste de votre stock n'est jamais visible. Ce qui circule est la marque et la référence,
 jamais vos étiquettes internes — le « 50 » d'une boutique n'est pas celui d'une autre.
+
+La disponibilité est vérifiée **à la recherche**, pas au partage : le partage est un choix
+durable, le stock bouge. Partager le matin et vendre à midi ne doit pas faire se déplacer un
+confrère l'après-midi.
 
 ## Ajouter des montures
 
@@ -100,7 +108,8 @@ constante écrite en dur s'est périmée quatre fois.
 | `mettre_a_jour.py` | enchaîne les deux, dans l'ordre |
 | `evaluer.py` | mesure sans fuite |
 | `journal.py` | collecte des identifications validées |
-| `inventaire.py` | sessions d'inventaire |
+| `stock.py` | quantités et emplacements, par mouvements |
+| `inventaire.py` | sessions d'inventaire et écarts |
 | `reseau.py` | réseau entre opticiens : partage, recherche, messagerie |
 | `metadonnees.py` | lecture/écriture de `data/montures.csv` (page `/saisie`) |
 | `recall_grid.py` | backbone de production, comparaison de backbones |

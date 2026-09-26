@@ -42,6 +42,7 @@ import metadonnees
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, charger_backbone
 from reseau import Reseau
+from stock import Stock
 
 # Seuil de repli, utilisé seulement si la tête n'apporte pas le sien. entrainer_tete.py calibre
 # le seuil à chaque entraînement et l'écrit à côté du modèle (data/tete.json), car sa bonne
@@ -285,6 +286,9 @@ JOURNAL = Journal(_DONNEES)
 INVENTAIRES = Inventaire(_DONNEES / "inventaires")
 # Le réseau porte des messages entre entreprises : il va dans le même volume persistant.
 RESEAU = Reseau(_DONNEES / "reseau.jsonl")
+# Le stock est la donnée métier de la boutique : sa perte coûterait plus cher que celle du
+# modèle, qui se reconstruit. Même volume persistant, pour la même raison.
+STOCK = Stock(_DONNEES / "stock.jsonl")
 
 
 @asynccontextmanager
@@ -400,10 +404,10 @@ def route_photo_monture(request: Request, label: str) -> FileResponse:
 
 @app.post("/inventaire")
 def route_inventaire_demarrer(request: Request, libelle: str = Query("", description="ex. 2026")) -> dict:
-    """Ouvre une session en figeant la liste des montures attendues, pour que le catalogue
-    puisse évoluer pendant l'inventaire sans fausser le décompte."""
-    montures = sorted({str(l) for l in _modeles(request).labels_catalogue})
-    session = INVENTAIRES.demarrer(montures, libelle)
+    """Ouvre une session en figeant le stock théorique, pour qu'il puisse bouger pendant
+    l'inventaire -- une vente, une réception -- sans fausser la comparaison finale."""
+    theorique = {m: e["quantite"] for m, e in STOCK.etat().items()}
+    session = INVENTAIRES.demarrer(theorique, libelle)
     return INVENTAIRES.etat(session)
 
 
@@ -421,11 +425,13 @@ def route_inventaire_etat(session: str) -> dict:
 
 
 @app.post("/inventaire/{session}/compter")
-def route_inventaire_compter(session: str, monture: str = Query(..., description="Monture pointée")) -> dict:
+def route_inventaire_compter(session: str,
+                              monture: str = Query(..., description="Monture pointée"),
+                              quantite: int = Query(1, ge=1, le=999)) -> dict:
     """Pointe une monture comme présente en rayon. L'identification par photo passe par
     /identifier ; ici l'opticien confirme, c'est lui qui fait foi."""
     try:
-        return INVENTAIRES.compter(session, monture)
+        return INVENTAIRES.compter(session, monture, quantite)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
     except ValueError as e:
@@ -433,19 +439,79 @@ def route_inventaire_compter(session: str, monture: str = Query(..., description
 
 
 @app.post("/inventaire/{session}/annuler")
-def route_inventaire_annuler(session: str, monture: str = Query(...)) -> dict:
+def route_inventaire_annuler(session: str, monture: str = Query(...),
+                              quantite: int = Query(1, ge=1, le=999)) -> dict:
     try:
-        return INVENTAIRES.annuler_comptage(session, monture)
+        return INVENTAIRES.annuler_comptage(session, monture, quantite)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
 
 
 @app.post("/inventaire/{session}/cloturer")
 def route_inventaire_cloturer(session: str) -> dict:
+    """Clôt et applique les comptages au stock : le rayon fait foi."""
     try:
-        return INVENTAIRES.cloturer(session)
+        return INVENTAIRES.cloturer(session, STOCK)
     except KeyError:
         raise HTTPException(status_code=404, detail=f"Inventaire {session} inconnu")
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+# Stock : ce qu'il y a en rayon, et où (module 1)
+# ---------------------------------------------------------------------------
+
+
+@app.get("/stock")
+def route_stock(request: Request) -> dict:
+    """Le stock, enrichi de la marque du catalogue pour être lisible côté interface."""
+    m = _modeles(request)
+    marques = {}
+    if m.marques_catalogue is not None:
+        marques = {str(l): str(mq).strip()
+                   for l, mq in zip(m.labels_catalogue, m.marques_catalogue)}
+    lignes = [{**e, "marque": marques.get(monture, "")}
+              for monture, e in sorted(STOCK.etat().items())]
+    return {"lignes": lignes, "bilan": STOCK.bilan()}
+
+
+@app.get("/stock/{monture:path}")
+def route_stock_monture(monture: str) -> dict:
+    return {**STOCK.etat_monture(monture), "mouvements": STOCK.mouvements(monture)}
+
+
+@app.post("/stock/{monture:path}/entree")
+def route_stock_entree(monture: str,
+                        quantite: int = Query(1, ge=1, le=999),
+                        emplacement: str = Query("", max_length=80),
+                        motif: str = Query("reception")) -> dict:
+    try:
+        return STOCK.entrer(monture, quantite, emplacement, motif)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/stock/{monture:path}/sortie")
+def route_stock_sortie(monture: str,
+                        quantite: int = Query(1, ge=1, le=999),
+                        motif: str = Query("vente")) -> dict:
+    """Refuse de descendre sous zéro : un stock négatif n'existe pas en rayon, et l'accepter
+    rendrait tous les chiffres douteux. Le correctif est /ajuster."""
+    try:
+        return STOCK.sortir(monture, quantite, motif)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
+
+
+@app.post("/stock/{monture:path}/ajuster")
+def route_stock_ajuster(monture: str,
+                         quantite: int = Query(..., ge=0, le=999),
+                         motif: str = Query("correction")) -> dict:
+    try:
+        return STOCK.ajuster(monture, quantite, motif)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.get("/journal/bilan")
@@ -532,21 +598,29 @@ def _boutique(jeton: str | None) -> str:
 
 
 def _catalogue_partageable(request: Request) -> list[dict]:
-    """Les montures du catalogue local qui ont une marque, avec leur référence si elle est
-    connue. Une monture sans marque n'est identifiable par aucun confrère : l'étiquette locale
-    (« 50 ») n'a de sens que dans cette boutique."""
+    """Les montures qu'on peut proposer au réseau : celles qui ont une marque ET qu'il reste en
+    rayon.
+
+    La marque, parce qu'aucun confrère ne saurait reconnaître une étiquette locale (« 50 »).
+    Le stock, parce que proposer une monture vendue la semaine dernière fait déplacer quelqu'un
+    pour rien -- c'est exactement ce que le réseau ne doit pas faire.
+    """
     m = _modeles(request)
     references = _references_catalogue()
     marques_par_photo = (m.marques_catalogue if m.marques_catalogue is not None
                          else [""] * len(m.labels_catalogue))
 
+    en_rayon = STOCK.en_stock()
+
     # Une monture par entrée, pas une par photo : le catalogue compte plusieurs vues de la même
     # monture, et la lister cinq fois rendrait le choix des montures à partager illisible.
     montures: dict[str, dict] = {}
     for label, marque in zip(m.labels_catalogue, marques_par_photo):
-        if str(marque).strip() and str(label) not in montures:
-            montures[str(label)] = {"libelle": str(label), "marque": str(marque).strip(),
-                                     "reference": references.get(str(label), "")}
+        label = str(label)
+        if str(marque).strip() and label not in montures and label in en_rayon:
+            montures[label] = {"libelle": label, "marque": str(marque).strip(),
+                                "reference": references.get(label, ""),
+                                "quantite": en_rayon[label]["quantite"]}
     return sorted(montures.values(), key=lambda x: (x["marque"], x["libelle"]))
 
 
@@ -619,7 +693,14 @@ def route_chercher(marque: str = Query("", description="Marque recherchée"),
     boutique = _boutique(x_boutique_jeton)
     if not marque.strip() and not reference.strip():
         raise HTTPException(status_code=400, detail="Préciser au moins une marque ou une référence")
-    return RESEAU.chercher(marque=marque, reference=reference, sauf_boutique=boutique)
+
+    # La disponibilité se vérifie ICI, pas au moment du partage. Le partage est un choix
+    # durable figé dans le journal ; le stock, lui, bouge. Filtrer seulement à l'inscription
+    # laisserait proposer une monture vendue depuis -- le confrère se déplace pour rien.
+    en_rayon = STOCK.en_stock()
+    return [{**t, "quantite": en_rayon[t["libelle"]]["quantite"]}
+            for t in RESEAU.chercher(marque=marque, reference=reference, sauf_boutique=boutique)
+            if t.get("libelle") in en_rayon]
 
 
 @app.post("/reseau/demande")

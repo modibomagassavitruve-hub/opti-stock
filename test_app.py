@@ -256,20 +256,31 @@ def test_photo_monture_refuse_une_etiquette_inconnue(client, tmp_path):
 
 
 def test_inventaire_bout_en_bout(client, tmp_path, monkeypatch):
+    """Le parcours complet : le stock annonce un théorique, le rayon dit autre chose, et la
+    clôture corrige le stock d'après le rayon."""
     from inventaire import Inventaire
-    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path))
+    from stock import Stock
+    monkeypatch.setattr(app_module, "INVENTAIRES", Inventaire(tmp_path / "inv"))
+    stock = Stock(tmp_path / "stock.jsonl")
+    monkeypatch.setattr(app_module, "STOCK", stock)
+    stock.entrer("talla/bogart2", 3)
+    stock.entrer("talla/gravita9015", 1)
 
     session = client.post("/inventaire?libelle=2026").json()
-    assert session["attendues"] == 3          # les 3 montures du catalogue factice
+    assert session["pieces_attendues"] == 4
     sid = session["session"]
 
-    etat = client.post(f"/inventaire/{sid}/compter?monture=talla/bogart2").json()
-    assert etat["trouvees"] == 1
-    assert len(etat["manquantes"]) == 2
+    etat = client.post(f"/inventaire/{sid}/compter?monture=talla/bogart2&quantite=2").json()
+    assert etat["pieces_comptees"] == 2
+    assert etat["manquantes"][0]["ecart"] == -1     # 2 comptées sur 3 attendues
 
     assert client.post(f"/inventaire/{sid}/cloturer").json()["statut"] == "clos"
+    assert stock.quantite("talla/bogart2") == 2, "le rayon fait foi"
+    assert stock.quantite("talla/gravita9015") == 0, "non comptée : elle n'est plus là"
+
     # un inventaire clos n'accepte plus de comptage : le décompte final ne doit plus bouger
     assert client.post(f"/inventaire/{sid}/compter?monture=talla/bogart2").status_code == 409
+    assert client.post(f"/inventaire/{sid}/cloturer").status_code == 409
 
 
 def test_inventaire_inconnu_renvoie_404(client, tmp_path, monkeypatch):
@@ -323,11 +334,18 @@ def reseau_vide(client, tmp_path, monkeypatch):
     """Réseau isolé par test. Sans cette redirection, les tests écriraient dans le vrai journal
     de la boutique : des inscriptions et des messages factices dans les données de production."""
     from reseau import Reseau
+    from stock import Stock
 
     monkeypatch.setattr(app_module, "RESEAU", Reseau(tmp_path / "reseau.jsonl"))
     monkeypatch.setattr(app_module, "_references_catalogue",
                         lambda: {"m1": "OS866", "m2": "6135"})
     client.app.state.modeles = _modeles_avec_marques()
+
+    # Le réseau ne propose que ce qui reste en rayon : sans stock, rien n'est partageable.
+    stock = Stock(tmp_path / "stock.jsonl")
+    monkeypatch.setattr(app_module, "STOCK", stock)
+    for monture in ("m1", "m2", "m3"):
+        stock.entrer(monture, 1)
     return client
 
 
@@ -564,3 +582,104 @@ def test_saisie_confirmation_explicite_valide(saisie):
     client, _ = saisie
     client.post("/saisie/marques", json={"m3": {"marque": "NEMEZIS", "confirmee": True}})
     assert {m["monture"] for m in client.get("/saisie/montures").json()["montures"]} == {"m2"}
+
+
+# ------------------------------------------------- stock (module 1)
+@pytest.fixture()
+def stock_api(client, tmp_path, monkeypatch):
+    from stock import Stock
+    s = Stock(tmp_path / "stock.jsonl")
+    monkeypatch.setattr(app_module, "STOCK", s)
+    client.app.state.modeles = _modeles_avec_marques()
+    return client, s
+
+
+def test_entree_en_stock_puis_lecture(stock_api):
+    client, _ = stock_api
+    r = client.post("/stock/m1/entree?quantite=3&emplacement=vitrine A")
+    assert r.status_code == 200
+    assert r.json()["quantite"] == 3
+
+    d = client.get("/stock").json()
+    ligne = [l for l in d["lignes"] if l["monture"] == "m1"][0]
+    assert (ligne["quantite"], ligne["emplacement"]) == (3, "vitrine A")
+    assert ligne["marque"] == "Osmose", "la marque du catalogue rend le stock lisible"
+    assert d["bilan"]["pieces"] == 3
+
+
+def test_vente_diminue_le_stock(stock_api):
+    client, _ = stock_api
+    client.post("/stock/m1/entree?quantite=2")
+    assert client.post("/stock/m1/sortie?quantite=1&motif=vente").json()["quantite"] == 1
+
+
+def test_vendre_plus_que_le_stock_renvoie_409(stock_api):
+    """Un stock négatif n'existe pas en rayon : le refus doit être franc, pas silencieux."""
+    client, s = stock_api
+    client.post("/stock/m1/entree?quantite=1")
+    assert client.post("/stock/m1/sortie?quantite=5").status_code == 409
+    assert s.quantite("m1") == 1
+
+
+def test_motif_invalide_refuse(stock_api):
+    client, _ = stock_api
+    assert client.post("/stock/m1/entree?motif=evaporation").status_code == 400
+
+
+def test_ajustement_et_historique(stock_api):
+    client, _ = stock_api
+    client.post("/stock/m1/entree?quantite=5")
+    client.post("/stock/m1/ajuster?quantite=2")
+    d = client.get("/stock/m1").json()
+    assert d["quantite"] == 2
+    assert [m["type"] for m in d["mouvements"]] == ["entree", "ajustement"]
+    assert d["mouvements"][-1]["ecart"] == -3
+
+
+def test_stock_vide(stock_api):
+    client, _ = stock_api
+    assert client.get("/stock").json()["bilan"]["pieces"] == 0
+    assert client.get("/stock/jamais_vue").json()["quantite"] == 0
+
+
+# ------------------------------------------------- stock x réseau
+def test_le_reseau_ne_propose_que_ce_qui_reste_en_rayon(reseau):
+    """Le défaut que ce module corrige : proposer une monture vendue fait déplacer un confrère
+    pour rien."""
+    client, entete_a, entete_b, _, b = reseau
+    client.post("/reseau/partage?montures=m1", headers=entete_b)
+    assert len(client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json()) == 1
+
+    client.post("/stock/m1/sortie?quantite=1&motif=vente")
+    assert client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json() == []
+
+
+def test_monture_epuisee_nest_plus_partageable(reseau):
+    client, entete_a, _, _, _ = reseau
+    client.post("/stock/m1/sortie?quantite=1&motif=vente")
+    libelles = {m["libelle"] for m in
+                client.get("/reseau/mon-stock", headers=entete_a).json()["montures"]}
+    assert "m1" not in libelles
+
+
+def test_le_partage_porte_la_quantite_disponible(reseau):
+    client, entete_a, entete_b, _, _ = reseau
+    client.post("/stock/m2/entree?quantite=4")
+    client.post("/reseau/partage?montures=m2", headers=entete_b)
+    trouve = client.get("/reseau/chercher?marque=Maritza", headers=entete_a).json()[0]
+    assert trouve["quantite"] == 5
+
+
+def test_la_disponibilite_est_verifiee_a_la_recherche_pas_au_partage(reseau):
+    """Le partage est figé dans le journal ; le stock bouge. Une boutique partage le matin,
+    vend à midi : l'après-midi la monture ne doit plus apparaître, sans qu'elle ait eu à
+    repartager quoi que ce soit."""
+    client, entete_a, entete_b, _, _ = reseau
+    client.post("/reseau/partage?montures=m1", headers=entete_b)
+    client.post("/stock/m1/sortie?quantite=1&motif=vente")
+
+    assert client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json() == []
+    # puis elle en reçoit à nouveau : elle réapparaît sans nouveau partage
+    client.post("/stock/m1/entree?quantite=2")
+    trouve = client.get("/reseau/chercher?marque=Osmose", headers=entete_a).json()
+    assert len(trouve) == 1 and trouve[0]["quantite"] == 2
