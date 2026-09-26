@@ -11,7 +11,7 @@ uvicorn app:app --port 8000     # puis ouvrir http://localhost:8000
 ## Utiliser
 
 **Identifier une monture.** Photographier, choisir la marque si elle est connue, valider la
-bonne proposition d'un clic. Préciser la marque fait passer le recall@5 de 0.79 à 0.86.
+bonne proposition d'un clic. Préciser la marque fait passer le recall@5 de 0.807 à 0.867.
 
 **Entrer en stock.** Après validation, la monture s'entre en rayon avec sa quantité et son
 emplacement. C'est ce qui fait de l'identification autre chose qu'une curiosité : sans stock,
@@ -93,10 +93,19 @@ successivement : l'auto-appariement (interroger avec une photo du catalogue), la
 l'entraînement (recall@1 de 0.77 avec, 0.26 sans), et le raccourci du décor (le modèle
 reconnaît l'endroit du présentoir, pas la monture). Détails dans `evaluer.py`.
 
-État actuel, sur 115 montures : **recall@5 = 0.861**, 0.855 avec filtre par marque. L'API
-répond dans 74 % des cas et a raison 91 % du temps. Le seuil de confiance est recalibré
-automatiquement à chaque entraînement — il dépend de la distribution des scores, et une
-constante écrite en dur s'est périmée quatre fois.
+État actuel, sur 115 montures : **recall@5 = 0.861**, recall@1 = 0.739. Avec filtre par marque,
+sur les 83 requêtes dont la marque est connue : 0.867 contre 0.807 sans. L'API répond dans
+74 % des cas et a raison 91 % du temps. Le seuil de confiance est recalibré automatiquement à
+chaque entraînement — il dépend de la distribution des scores, et une constante écrite en dur
+s'est périmée quatre fois.
+
+**Ne pas confondre avec le chiffre affiché en fin d'entraînement** (0.940). Celui-là vient de
+la validation interne, dont le découpage est plus favorable. Seul `evaluer.py` applique le
+protocole sans fuite, et c'est lui qui fait foi : l'écart entre les deux est de 8 points.
+
+**Renseigner 7 marques de plus n'a pas bougé le recall global** (0.861 avant comme après). Ce
+que ça change est ailleurs : 83 requêtes au lieu de 76 peuvent utiliser le filtre par marque,
+et 7 montures de plus sont proposables au réseau.
 
 ## Fichiers
 
@@ -133,7 +142,7 @@ pu être lues — et une, RAY-BAN, à sa signature sur le verre.
 C'est donc une saisie humaine, et `http://localhost:8000/saisie` la sert : la vignette de
 chaque monture, un champ marque avec les marques déjà connues en autocomplétion. L'opticien
 reconnaît son propre stock à l'œil, sans avoir besoin de la gravure. Le gain vaut le quart
-d'heure : le recall@5 passe de 0.79 à 0.86, et une monture sans marque ne peut pas être
+d'heure : le recall@5 passe de 0.807 à 0.867, et une monture sans marque ne peut pas être
 proposée au réseau.
 
 Une marque devinée y reste marquée « à vérifier » tant qu'elle n'a pas été cochée :
