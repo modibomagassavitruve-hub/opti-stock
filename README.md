@@ -102,6 +102,7 @@ constante écrite en dur s'est périmée quatre fois.
 | `journal.py` | collecte des identifications validées |
 | `inventaire.py` | sessions d'inventaire |
 | `reseau.py` | réseau entre opticiens : partage, recherche, messagerie |
+| `metadonnees.py` | lecture/écriture de `data/montures.csv` (page `/saisie`) |
 | `recall_grid.py` | backbone de production, comparaison de backbones |
 | `finetune_triplet.py` | tête de projection et sa perte |
 | `parse_etiquette.py` | lecture d'étiquette (OCR → champs) |
@@ -115,8 +116,20 @@ l'exploration initiale sur le jeu Kaggle ; ils ne servent plus à la production.
 secondes : même lumière, même fond, même angle. Une photo prise un autre jour est un cas que
 le jeu de test ne contient pas. Le journal existe pour combler ça à l'usage.
 
-**39 montures sur 115 n'ont pas de marque.** Les renseigner dans `data/montures.csv` est le
-gain le plus accessible : le recall@5 passe de 0.79 à 0.86 quand la marque est connue.
+**32 montures sur 115 n'ont pas de marque, et l'information n'est pas dans les photos.**
+Passées à l'OCR, elles ne rendent que les autocollants de verres (« UV 100% cat.3 ») : la
+gravure est à l'intérieur de la branche, qui n'a pas été photographiée. Seules 5 marques ont
+pu être lues — et une, RAY-BAN, à sa signature sur le verre.
+
+C'est donc une saisie humaine, et `http://localhost:8000/saisie` la sert : la vignette de
+chaque monture, un champ marque avec les marques déjà connues en autocomplétion. L'opticien
+reconnaît son propre stock à l'œil, sans avoir besoin de la gravure. Le gain vaut le quart
+d'heure : le recall@5 passe de 0.79 à 0.86, et une monture sans marque ne peut pas être
+proposée au réseau.
+
+Une marque devinée y reste marquée « à vérifier » tant qu'elle n'a pas été cochée :
+enregistrer la page ne vaut pas relecture. Après saisie, `python mettre_a_jour.py` — le
+catalogue embarque les marques au moment où il est construit.
 
 **Photographier plus de montures n'améliorera pas le modèle** — la courbe d'apprentissage est
 plate entre 10 et 80 montures d'entraînement. C'est utile pour couvrir le stock, pas pour la

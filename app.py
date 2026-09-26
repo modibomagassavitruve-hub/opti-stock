@@ -38,6 +38,7 @@ from PIL import Image, ImageOps
 
 from inventaire import Inventaire
 from journal import Journal, chronometre
+import metadonnees
 from parse_etiquette import parse_etiquette
 from recall_grid import BACKBONE_PROD, charger_backbone
 from reseau import Reseau
@@ -461,6 +462,55 @@ async def route_lire_etiquette(
 ) -> dict:
     image = _lire_image_uploadee(await photo.read())
     return lire_etiquette(image, _modeles(request))
+
+
+# ---------------------------------------------------------------------------
+# Saisie des marques
+#
+# 33 montures sur 115 n'ont pas de marque, et l'information n'est pas dans les photos : l'OCR
+# n'y lit que les autocollants de verres, la gravure étant à l'intérieur de la branche. C'est
+# donc une saisie humaine -- mais l'opticien reconnaît ses propres montures à l'œil, d'où une
+# page qui montre la vignette plutôt qu'une liste d'identifiants.
+# ---------------------------------------------------------------------------
+
+METADONNEES = Path(os.environ.get("OPTI_STOCK_METADONNEES", "data/montures.csv"))
+
+
+@app.get("/saisie", include_in_schema=False)
+def route_saisie() -> FileResponse:
+    page = Path(__file__).parent / "saisie.html"
+    if not page.is_file():
+        raise HTTPException(status_code=404, detail="saisie.html introuvable")
+    return FileResponse(page, media_type="text/html")
+
+
+@app.get("/saisie/montures")
+def route_saisie_montures() -> dict:
+    """Ce qu'il reste à renseigner, plus l'état du stock pour situer l'effort."""
+    return {"montures": metadonnees.a_completer(METADONNEES),
+            "bilan": metadonnees.bilan(METADONNEES)}
+
+
+@app.post("/saisie/marques")
+def route_saisie_enregistrer(saisies: dict[str, dict]) -> dict:
+    """Enregistre les marques saisies. `saisies` : {monture: {marque, reference, confirmee}}.
+
+    `confirmee` dit qu'un humain a relu cette valeur : sans lui, une lecture OCR renvoyée telle
+    quelle reste marquée « à vérifier » plutôt que de passer pour un fait établi.
+
+    Écrit directement dans data/montures.csv. La modification ne change RIEN au modèle servi
+    tant que `python mettre_a_jour.py` n'a pas été relancé : le catalogue embarque les marques
+    au moment où il est construit. L'interface le rappelle après chaque enregistrement."""
+    marques = {m: (v.get("marque") or "") for m, v in saisies.items()}
+    references = {m: (v.get("reference") or "") for m, v in saisies.items()}
+    confirmees = {m for m, v in saisies.items() if v.get("confirmee")}
+    try:
+        modifiees = metadonnees.ecrire_marques(METADONNEES, marques, references, confirmees)
+    except KeyError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+    return {"modifiees": modifiees, "bilan": metadonnees.bilan(METADONNEES)}
 
 
 # ---------------------------------------------------------------------------

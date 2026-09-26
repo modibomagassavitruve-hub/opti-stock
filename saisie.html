@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Opti-Stock — saisie des marques</title>
+<style>
+  :root {
+    --fond: #ffffff; --encre: #1a1a1a; --trait: #dcdcdc; --gris: #666;
+    --rouge: #b00020; --vert: #1b7f3b; --champ: #ffffff; --bouton: #fafafa;
+    --ok-fond: #e8f5ec; --ok-trait: #b6dfc4;
+    --doute-fond: #fff4e5; --doute-trait: #f0d5a8; --doute-encre: #8a5a00;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fond: #17181a; --encre: #e8e8e8; --trait: #3a3c40; --gris: #a0a0a0;
+      --rouge: #ff6b6b; --vert: #5fd18a; --champ: #202226; --bouton: #26282c;
+      --ok-fond: #17331f; --ok-trait: #2d6b45;
+      --doute-fond: #33280f; --doute-trait: #6b5520; --doute-encre: #e8c46a;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+         max-width: 900px; margin: 0 auto; padding: 24px 16px 120px;
+         color: var(--encre); background: var(--fond); }
+  h1 { font-size: 1.3rem; margin-bottom: 4px; }
+  .sous-titre { color: var(--gris); font-size: .9rem; margin-top: 0; }
+  a { color: var(--vert); }
+  .bandeau { padding: 11px 14px; border-radius: 8px; margin: 14px 0; font-size: .92rem; }
+  .doute { background: var(--doute-fond); border: 1px solid var(--doute-trait); color: var(--doute-encre); }
+  .fiable { background: var(--ok-fond); border: 1px solid var(--ok-trait); color: var(--vert); }
+  .erreur { color: var(--rouge); font-size: .9rem; }
+
+  .grille { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 14px; }
+  .fiche { border: 1px solid var(--trait); border-radius: 10px; padding: 10px; background: var(--champ); }
+  .fiche.faite { border-color: var(--ok-trait); background: var(--ok-fond); }
+  /* Les photos sont toutes en portrait (189x420) avec la monture au centre : affichées
+     entières, elles réduisent la monture à un timbre-poste. On recadre donc sur la bande
+     centrale, qui la contient dans tous les cas observés. Le clic ouvre la photo entière,
+     au cas où ce recadrage couperait quelque chose. */
+  .fiche img { width: 100%; aspect-ratio: 3 / 2; object-fit: cover; object-position: center;
+    background: var(--trait); border-radius: 6px; display: block; cursor: zoom-in; }
+  .fiche .ref { font-size: .78rem; color: var(--gris); margin: 6px 0 4px; }
+  .fiche input[type=text], .fiche input:not([type]) { width: 100%; padding: 6px 7px;
+    margin-bottom: 5px; font-size: .9rem; border: 1px solid var(--trait); border-radius: 6px;
+    background: var(--fond); color: var(--encre); }
+  .fiche .indice { display: block; font-size: .75rem; color: var(--doute-encre);
+    margin: 0 0 5px; cursor: pointer; }
+
+  .barre { position: fixed; bottom: 0; left: 0; right: 0; background: var(--fond);
+    border-top: 1px solid var(--trait); padding: 12px 16px; text-align: center; }
+  button { padding: 9px 20px; border: 1px solid var(--trait); background: var(--bouton);
+    color: var(--encre); border-radius: 7px; cursor: pointer; font-size: .92rem; }
+  button:hover:not(:disabled) { border-color: var(--gris); }
+  button:disabled { opacity: .5; cursor: default; }
+  code { background: var(--champ); border: 1px solid var(--trait); padding: 1px 5px;
+    border-radius: 4px; font-size: .85rem; }
+
+  dialog { border: none; border-radius: 12px; padding: 0; background: var(--champ);
+    max-width: 92vw; max-height: 92vh; }
+  dialog img { max-width: 88vw; max-height: 88vh; display: block; }
+  dialog::backdrop { background: rgba(0,0,0,.72); }
+</style>
+</head>
+<body>
+
+<h1>Saisie des marques</h1>
+<p class="sous-titre">Une monture sans marque ne peut pas être proposée au réseau, et la marque
+   fait passer le recall@5 de 0.79 à 0.86. — <a href="/">retour à l'application</a></p>
+
+<div id="etat"></div>
+<div class="grille" id="grille"></div>
+
+<datalist id="marquesConnues"></datalist>
+
+<div class="barre">
+  <button id="btnEnregistrer" onclick="enregistrer()">Enregistrer</button>
+  <span id="compteur" class="sous-titre"></span>
+</div>
+
+<dialog id="loupe" onclick="this.close()"><img id="loupeImg" alt=""></dialog>
+
+<script>
+const el = (id) => document.getElementById(id);
+let montures = [];
+
+// Marques devinées, pas constatées. Elles restent signalées tant qu'un humain n'a pas coché :
+// enregistrer la page ne doit pas suffire à les faire passer pour vérifiées.
+const A_VERIFIER = {
+  ocr_a_verifier: 'lu par OCR — cocher si c\'est bien ça',
+  dossier_a_verifier: 'déduit du nom du dossier — cocher si c\'est bien ça',
+};
+
+/** `confirmation` survit au rechargement de la liste : c'est elle qui porte la consigne de
+ *  reconstruire le catalogue, et la perdre rendrait la saisie sans effet sans prévenir. */
+async function charger(confirmation = '') {
+  try {
+    const d = await fetch('/saisie/montures').then(r => r.json());
+    montures = d.montures;
+    const liste = el('marquesConnues');
+    liste.innerHTML = '';
+    d.bilan.marques.forEach(m => liste.appendChild(new Option(m, m)));
+
+    el('etat').innerHTML = confirmation + (d.montures.length
+      ? `<div class="bandeau doute"><strong>${d.bilan.sans_marque} montures sans marque</strong>
+         sur ${d.bilan.montures}${d.bilan.a_verifier ? `, et ${d.bilan.a_verifier} lue(s) par OCR
+         à confirmer` : ''}. La marque n'est pas lisible sur les photos — l'OCR n'y voit que les
+         autocollants de verres. Reconnaissez la monture à l'œil et tapez la marque.</div>`
+      : `<div class="bandeau fiable">Toutes les montures ont une marque. Rien à saisir.</div>`);
+
+    el('grille').innerHTML = montures.map((m, i) => `
+      <div class="fiche" id="fiche${i}">
+        <img src="/monture/${encodeURIComponent(m.monture)}/photo" loading="lazy" alt=""
+             onclick="agrandir('${encodeURIComponent(m.monture)}')">
+        <p class="ref">${m.monture}</p>
+        <input list="marquesConnues" placeholder="Marque" value="${m.marque || ''}"
+               data-monture="${m.monture}" data-champ="marque" oninput="majFiche(${i})">
+        <input placeholder="Référence (facultatif)" value="${m.reference || ''}"
+               data-monture="${m.monture}" data-champ="reference">
+        ${A_VERIFIER[m.etat] ? `<label class="indice">
+           <input type="checkbox" data-monture="${m.monture}" data-champ="confirmee"
+                  onchange="majFiche(${i})"> ${A_VERIFIER[m.etat]}</label>` : ''}
+      </div>`).join('');
+    montures.forEach((_, i) => majFiche(i));
+  } catch (e) {
+    el('etat').innerHTML = '<p class="erreur">Chargement impossible : ' + e.message + '</p>';
+  }
+}
+
+function agrandir(monture) {
+  el('loupeImg').src = '/monture/' + monture + '/photo';
+  el('loupe').showModal();
+}
+
+/** Une fiche n'est « faite » que si sa marque est saisie ET, quand elle vient d'une déduction,
+ *  qu'elle a été confirmée : sinon le vert donnerait à croire que la ligne est réglée. */
+function estReglee(j) {
+  const marque = document.querySelector(`#fiche${j} input[data-champ="marque"]`).value.trim();
+  const aCocher = document.querySelector(`#fiche${j} input[data-champ="confirmee"]`);
+  return !!marque && (!aCocher || aCocher.checked);
+}
+
+function majFiche(i) {
+  el('fiche' + i).classList.toggle('faite', estReglee(i));
+  const faites = montures.filter((_, j) => estReglee(j)).length;
+  el('compteur').textContent = `${faites} / ${montures.length} réglées`;
+}
+
+async function enregistrer() {
+  const saisies = {};
+  document.querySelectorAll('input[data-monture]').forEach(c => {
+    const m = c.dataset.monture;
+    (saisies[m] = saisies[m] || {})[c.dataset.champ] =
+      c.type === 'checkbox' ? c.checked : c.value.trim();
+  });
+
+  const bouton = el('btnEnregistrer');
+  bouton.disabled = true;
+  try {
+    const r = await fetch('/saisie/marques', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(saisies) });
+    if (!r.ok) throw new Error((await r.json()).detail || 'HTTP ' + r.status);
+    const d = await r.json();
+
+    // Le catalogue embarque les marques au moment où il est construit : sans reconstruction,
+    // la saisie reste sans effet sur l'identification et sur le réseau.
+    await charger(`<div class="bandeau fiable">
+      ${d.modifiees} ligne(s) enregistrée(s) — il reste ${d.bilan.sans_marque} monture(s) sans marque.
+      <br><strong>Pour que ça prenne effet</strong>, relancez <code>python mettre_a_jour.py</code>
+      puis redémarrez l'API : le catalogue embarque les marques au moment où il est construit.</div>`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  } catch (e) {
+    el('etat').innerHTML = '<p class="erreur">Enregistrement impossible : ' + e.message + '</p>';
+  } finally {
+    bouton.disabled = false;
+  }
+}
+
+charger();
+</script>
+</body>
+</html>

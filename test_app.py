@@ -484,3 +484,83 @@ def test_mon_stock_liste_une_monture_par_entree_pas_une_par_photo(reseau):
 
     montures = client.get("/reseau/mon-stock", headers=entete_a).json()["montures"]
     assert [m["libelle"] for m in montures] == ["m2", "m1"]  # triées par marque
+
+
+# ------------------------------------------------- saisie des marques
+@pytest.fixture()
+def saisie(client, tmp_path, monkeypatch):
+    """CSV isolé : sans ça les tests écriraient dans le vrai fichier de stock."""
+    import csv as _csv
+
+    import metadonnees as md
+    chemin = tmp_path / "montures.csv"
+    with open(chemin, "w", newline="", encoding="utf-8") as f:
+        (w := _csv.DictWriter(f, md.CHAMPS)).writeheader()
+        w.writerows([
+            {"monture": "m1", "marque": "OSMOSE", "reference": "", "ean": "", "etat": "saisi"},
+            {"monture": "m2", "marque": "", "reference": "", "ean": "", "etat": "a_saisir"},
+            {"monture": "m3", "marque": "NEMEZIS", "reference": "", "ean": "", "etat": "ocr_a_verifier"},
+        ])
+    monkeypatch.setattr(app_module, "METADONNEES", chemin)
+    return client, chemin
+
+
+def test_saisie_liste_ce_qui_reste(saisie):
+    client, _ = saisie
+    d = client.get("/saisie/montures").json()
+    assert {m["monture"] for m in d["montures"]} == {"m2", "m3"}
+    assert d["bilan"]["sans_marque"] == 1
+    assert d["bilan"]["a_verifier"] == 1
+
+
+def test_saisie_enregistre_et_met_a_jour_le_bilan(saisie):
+    client, _ = saisie
+    r = client.post("/saisie/marques", json={"m2": {"marque": "IKALY", "reference": "IK1"}})
+    assert r.status_code == 200
+    assert r.json()["modifiees"] == 1
+    assert r.json()["bilan"]["sans_marque"] == 0
+    assert "IKALY" in r.json()["bilan"]["marques"]
+
+
+def test_saisie_corriger_une_lecture_ocr_la_retire_de_la_liste(saisie):
+    """Retaper la marque est un geste humain : pas besoin de cocher en plus."""
+    client, _ = saisie
+    client.post("/saisie/marques", json={"m3": {"marque": "IKALY"}})
+    assert {m["monture"] for m in client.get("/saisie/montures").json()["montures"]} == {"m2"}
+
+
+def test_saisie_monture_inconnue_rejetee_sans_rien_ecrire(saisie):
+    client, chemin = saisie
+    avant = chemin.read_text()
+    r = client.post("/saisie/marques", json={"inexistante": {"marque": "X"}})
+    assert r.status_code == 400
+    assert chemin.read_text() == avant
+
+
+def test_saisie_marque_vide_efface(saisie):
+    """Corriger une lecture OCR fausse en effaçant le champ."""
+    client, _ = saisie
+    client.post("/saisie/marques", json={"m3": {"marque": ""}})
+    assert client.get("/saisie/montures").json()["bilan"]["sans_marque"] == 2
+
+
+def test_page_saisie_servie(saisie):
+    client, _ = saisie
+    r = client.get("/saisie")
+    assert r.status_code == 200
+    assert "text/html" in r.headers["content-type"]
+
+
+def test_saisie_enregistrer_ne_confirme_pas_les_lectures_ocr(saisie):
+    """Enregistrer la page ne doit pas valider une marque devinée que personne n'a relue :
+    elle resterait sinon proposée au réseau comme un fait établi."""
+    client, _ = saisie
+    client.post("/saisie/marques", json={"m3": {"marque": "NEMEZIS"}})
+    restantes = {m["monture"]: m for m in client.get("/saisie/montures").json()["montures"]}
+    assert restantes["m3"]["etat"] == "ocr_a_verifier"
+
+
+def test_saisie_confirmation_explicite_valide(saisie):
+    client, _ = saisie
+    client.post("/saisie/marques", json={"m3": {"marque": "NEMEZIS", "confirmee": True}})
+    assert {m["monture"] for m in client.get("/saisie/montures").json()["montures"]} == {"m2"}
