@@ -3,6 +3,15 @@
 data/*
 !data/*.csv
 
+# Le modèle servi : 2,7 Mo au total, et un serveur déployé n'a ni les 905 Mo de photos
+# sources ni le temps de les réencoder. Ces trois-là partent donc avec le code.
+# Ils sont indissociables : reconstruire l'un sans l'autre dégrade les résultats en silence.
+!data/catalogue.npz
+!data/tete.pt
+!data/tete.json
+!data/vignettes/
+!data/vignettes/*.jpg
+
 __pycache__/
 *.pyc
 .pytest_cache/

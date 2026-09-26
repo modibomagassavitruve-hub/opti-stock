@@ -1,0 +1,29 @@
+# Déploiement Render. À connecter à un dépôt GitHub depuis le tableau de bord Render.
+#
+# CHOIX DU FORFAIT -- la seule décision qui compte ici.
+# Mesuré sur cette application : 440 Mo de pic sous 12 requêtes simultanées, sur macOS qui
+# compresse la mémoire. Sous Linux, compter davantage. Le forfait gratuit et le Starter
+# plafonnent à 512 Mo : l'instance serait tuée dès les premières requêtes parallèles.
+# D'où `standard` (2 Go). Le gratuit est de toute façon inutilisable pour une démonstration :
+# il met l'instance en veille après 15 minutes, et le réveil demande le démarrage du
+# conteneur PLUS le chargement du modèle -- de l'ordre de la minute et demie.
+#
+# Pour un salon, préférer ./demarrer_demo.sh : tunnel immédiat, pleine vitesse, aucun coût.
+#
+services:
+  - type: web
+    name: opti-stock
+    runtime: docker
+    plan: standard          # 2 Go. free et starter (512 Mo) ne suffisent pas, voir ci-dessus.
+    region: frankfurt
+    healthCheckPath: /sante
+    envVars:
+      # Le journal des identifications validées est la seule mesure de fiabilité en conditions
+      # réelles, et il s'accumule sur des semaines. Sans disque monté, il disparaîtrait à
+      # chaque redéploiement -- avec le stock et les fiches, qui vivent au même endroit.
+      - key: OPTI_STOCK_JOURNAL
+        value: /journal
+    disk:
+      name: journal
+      mountPath: /journal
+      sizeGB: 1
