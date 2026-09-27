@@ -17,14 +17,20 @@ Comptez dix minutes, dont sept d'attente pendant la construction.
 
 ## 3. Créer le Space (1 min)
 
+> **Docker est passé payant chez Hugging Face.** Seuls *Static* et *Gradio* restent gratuits.
+> On passe donc par Gradio — qui est lui-même bâti sur FastAPI, le socle de cette application.
+> `space.py` greffe une page Gradio minimale DANS notre API : celle-ci garde la racine et sert
+> l'interface des opticiens, Gradio occupe `/gradio` et satisfait l'hébergeur.
+
+
 <https://huggingface.co/new-space>
 
 | Champ | Valeur |
 |---|---|
 | Space name | `opti-stock` |
 | License | `mit` |
-| SDK | **Docker** → *Blank* |
-| Hardware | **CPU basic** (gratuit) |
+| SDK | **Gradio** → modèle *Blank* |
+| Space hardware | **CPU Basic** — PAS ZeroGPU, voir plus bas |
 | Visibilité | **Public** |
 
 ## 4. Envoyer le code (1 min + 7 de construction)
@@ -47,6 +53,13 @@ Saisie, étiquette, stock, inventaire et réseau fonctionnent.
 ```
 
 C'est normal, et c'est voulu — voir plus bas.
+
+### Matériel : CPU Basic, pas ZeroGPU
+
+ZeroGPU est proposé gratuitement et sélectionné par défaut, mais il impose son propre modèle
+de programmation (décorateurs `@spaces.GPU`) et ne convient pas ici. Cette application tourne
+sur processeur — 487 Mio au repos, 2,2 Gio sous OCR, mesurés dans un conteneur Linux — et
+**CPU Basic** offre 2 vCPU et 16 Go, largement de quoi.
 
 ## 5. Votre adresse
 

@@ -1,3 +1,4 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
 fastapi
 uvicorn[standard]
 python-multipart
@@ -8,8 +9,13 @@ numpy
 pandas
 scipy
 easyocr
+# gradio : uniquement pour satisfaire le SDK du Space (voir space.py).
+# L'application n'en dépend pas -- FastAPI sert tout.
+gradio
 # segno : QR code de demarrer_demo.sh, pour faire scanner l'adresse sur un stand.
 segno
-# glasses-detector : seulement pour construire_catalogue.py --recadrage, option
-# mesurée comme dégradante et conservée pour comparaison. Pas requis pour servir.
-glasses-detector
+# glasses-detector n'est PAS installé : il ne sert qu'à construire_catalogue.py --recadrage,
+# une option mesurée comme dégradante (recall@5 0.33 contre 0.80 sans) et conservée pour
+# comparaison. Il tire des dépendances lourdes qui feraient dépasser le temps de construction
+# d'un hébergement gratuit, pour du code que personne n'exécute.
+#     pip install glasses-detector   # si vous voulez vraiment refaire cette comparaison
