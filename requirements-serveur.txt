@@ -1,0 +1,15 @@
+# Dépendances d'un serveur SANS reconnaissance ni OCR — le mode qui tient dans les 512 Mo
+# d'un hébergement gratuit (OPTI_STOCK_SANS_OCR=1).
+#
+# Ce qui manque ici est délibéré : torch, transformers et easyocr pèsent à eux seuls plus de
+# 2 Go sous charge. Il n'existe pas de substitut léger pour l'OCR — Tesseract, testé sur les
+# mêmes photos d'étiquettes, ne lit rien : il attend un document scanné, pas une gravure de
+# quelques millimètres sur une monture en rayon.
+#
+# Reste le parcours qui n'a besoin d'aucun modèle : saisie manuelle avec photo, stock,
+# inventaire à écarts chiffrés, réseau entre opticiens et sa messagerie.
+fastapi
+uvicorn[standard]
+python-multipart
+pillow
+numpy

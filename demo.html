@@ -268,8 +268,8 @@
 <!-- ------------------------------------------------------------ SAISIR -->
 <div class="page" id="page-saisir">
   <h2>Entrer une monture</h2>
-  <p class="sous">Photographiez la monture, puis son étiquette pour remplir les champs
-     automatiquement.</p>
+  <p class="sous" id="introSaisir">Photographiez la monture, puis son étiquette pour remplir
+     les champs automatiquement.</p>
 
   <div class="carte">
     <div class="photo-zone" id="zonePhoto">
@@ -279,9 +279,12 @@
              onchange="apercu()">
     </div>
 
-    <button class="petit" style="width:100%;margin-bottom:12px" onclick="el('photoEtiquette').click()">
+    <button class="petit" id="btnEtiquette" style="width:100%;margin-bottom:12px"
+            onclick="el('photoEtiquette').click()">
       🏷️ Lire l'étiquette pour remplir les champs
     </button>
+    <p class="aide" id="noteEtiquette" hidden style="margin:0 0 12px">La lecture d'étiquette
+       n'est pas disponible sur ce serveur — saisissez marque et référence ci-dessous.</p>
     <input type="file" id="photoEtiquette" accept="image/*" capture="environment"
            style="display:none" onchange="lireEtiquette()">
     <div id="sortieEtiquette"></div>
@@ -312,7 +315,7 @@
     <div id="sortieSaisie"></div>
   </div>
 
-  <div class="carte">
+  <div class="carte" id="carteIdentifier" hidden>
     <h2 style="font-size:1rem">Reconnaître une monture déjà connue</h2>
     <p class="aide" style="margin:4px 0 10px">Si la monture est déjà dans votre catalogue,
        une photo suffit à la retrouver.</p>
@@ -496,9 +499,32 @@ function onglet(nom) {
   if (nom === 'reseau' && boutiques.length) changerBoutique();
 }
 
+/** Ce que CE serveur sait faire. Un hébergement gratuit ne peut pas porter l'OCR -- EasyOCR
+ *  embarque PyTorch et demande plus de 2 Go. Plutôt que de laisser des boutons qui répondront
+ *  503, on les retire : un bouton absent s'explique, un bouton qui échoue fait douter de tout
+ *  le reste. */
+function appliquerCapacites(c) {
+  const etiquette = el('btnEtiquette');
+  const reconnaissance = el('carteIdentifier');
+  if (etiquette) {
+    etiquette.hidden = !c.ocr;
+    el('noteEtiquette').hidden = c.ocr;
+    // La promesse d'introduction doit suivre : annoncer l'étiquette sur un serveur qui ne la
+    // lit pas ferait chercher un bouton qui n'existe pas.
+    el('introSaisir').textContent = c.ocr
+      ? "Photographiez la monture, puis son étiquette pour remplir les champs automatiquement."
+      : "Photographiez la monture et renseignez marque et référence.";
+  }
+  if (reconnaissance) reconnaissance.hidden = !c.reconnaissance;
+}
+
 async function connecter() {
   try {
-    const marques = (await req('/marques').then(r => r.json())).marques;
+    const [marques, capacites] = await Promise.all([
+      req('/marques').then(r => r.json()).then(d => d.marques),
+      req('/sante').then(r => r.json()).catch(() => ({ ocr: true, reconnaissance: true })),
+    ]);
+    appliquerCapacites(capacites);
     for (const id of ['marquesConnues', 'marqueReseau']) {
       const cible = el(id);
       cible.innerHTML = id === 'marqueReseau' ? '<option value="">—</option>' : '';

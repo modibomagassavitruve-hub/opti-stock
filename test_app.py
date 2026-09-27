@@ -285,7 +285,11 @@ def test_inventaire_inconnu_renvoie_404(comptoir):
 
 
 def test_route_sante(client):
-    assert client.get("/sante").json() == {"statut": "ok"}
+    """/sante annonce aussi ce que ce serveur sait faire : l'interface s'en sert pour masquer
+    les fonctions absentes plutôt que d'afficher des boutons qui répondront 503."""
+    d = client.get("/sante").json()
+    assert d["statut"] == "ok"
+    assert d["reconnaissance"] is True and d["ocr"] is True
 
 
 def test_route_identifier_ok(client):
@@ -991,3 +995,32 @@ def test_le_mode_leger_reconnait_les_marques_courantes():
                              ("RAY-BAN RB3025 001/51 58 14 135", "Ray-Ban"),
                              ("LINDBERG 9707 n.o.w.", "Lindberg")]:
         assert parse_etiquette(texte, app_module.MARQUES_COURANTES).marque == attendue
+
+
+# ------------------------------------------------- mode minimal (hébergement gratuit)
+def test_mode_minimal_refuse_reconnaissance_et_ocr(monkeypatch):
+    """512 Mo ne peuvent pas contenir EasyOCR : le serveur gratuit sert la saisie manuelle et
+    refuse explicitement le reste, plutôt que d'échouer sans explication."""
+    m = app_module.charger_modeles_minimal()
+    for appel in (lambda: m.ocr(Image.new("RGB", (5, 5))),
+                   lambda: m.embedder([Image.new("RGB", (5, 5))])):
+        with pytest.raises(app_module.HTTPException) as e:
+            appel()
+        assert e.value.status_code == 503
+        assert "indisponible" in e.value.detail
+
+
+def test_mode_minimal_garde_les_marques_pour_la_saisie(monkeypatch):
+    """Le champ Marque propose toujours une autocomplétion : c'est tout ce qui reste pour
+    aller vite au comptoir."""
+    assert "Ray-Ban" in app_module.charger_modeles_minimal().marques_connues
+
+
+def test_sante_annonce_les_capacites(comptoir, monkeypatch):
+    """L'interface s'y fie pour masquer les boutons qui n'aboutiraient à rien."""
+    d = comptoir.get("/sante").json()
+    assert d["statut"] == "ok"
+    assert set(d) == {"statut", "reconnaissance", "ocr"}
+
+    monkeypatch.setenv("OPTI_STOCK_SANS_OCR", "1")
+    assert comptoir.get("/sante").json()["ocr"] is False

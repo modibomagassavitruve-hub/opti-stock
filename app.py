@@ -358,6 +358,38 @@ MARQUES_COURANTES = [
 ]
 
 
+def _indisponible(quoi: str, sinon: str):
+    """Refus explicite plutôt que silence : l'interface saura quoi masquer et l'opticien saura
+    pourquoi, au lieu de croire que l'application est cassée."""
+    def refuser(*_a, **_k):
+        raise HTTPException(status_code=503, detail=f"{quoi} indisponible sur ce serveur. {sinon}")
+    return refuser
+
+
+def charger_modeles_minimal() -> Modeles:
+    """Ni reconnaissance, ni OCR : la saisie manuelle, le stock, l'inventaire et le réseau.
+
+    C'est ce qui tient dans les 512 Mo d'un hébergement gratuit. EasyOCR embarque PyTorch et
+    demande à lui seul plus de 2 Go sous charge -- et il n'existe pas de substitut léger :
+    Tesseract, testé sur les mêmes photos d'étiquettes, ne lit rien du tout. Un OCR classique
+    attend un document scanné ; une gravure de quelques millimètres sur une monture en rayon
+    est précisément ce qu'il ne sait pas faire.
+
+    Activé par OPTI_STOCK_SANS_OCR=1.
+    """
+    return Modeles(
+        recadrer=lambda image: image,
+        embedder=_indisponible("La reconnaissance par photo est",
+                                "Saisissez la monture à la main, c'est rapide."),
+        tete=_indisponible("La reconnaissance par photo est", ""),
+        ocr=_indisponible("La lecture d'étiquette est",
+                           "Saisissez marque et référence à la main."),
+        marques_connues=MARQUES_COURANTES,
+        emb_catalogue=np.empty((0, 1), dtype="float32"),
+        labels_catalogue=np.array([]),
+    )
+
+
 def charger_modeles_leger() -> Modeles:
     """Tout sauf la reconnaissance par similarité : OCR d'étiquette, saisie, stock, inventaire
     et réseau.
@@ -399,6 +431,13 @@ async def lifespan(app: FastAPI):
     # données d'une boutique -- et le parcours qui compte (saisir, lire l'étiquette, tenir son
     # stock) n'a pas besoin du modèle.
     catalogue = Path("data/catalogue.npz")
+    if os.environ.get("OPTI_STOCK_SANS_OCR") == "1":
+        print("[minimal] Reconnaissance ET lecture d'étiquette désactivées "
+              "(OPTI_STOCK_SANS_OCR=1). Saisie, stock, inventaire et réseau fonctionnent.")
+        app.state.modeles = charger_modeles_minimal()
+        yield
+        return
+
     leger = os.environ.get("OPTI_STOCK_LEGER") == "1" or not catalogue.is_file()
     if leger:
         raison = ("OPTI_STOCK_LEGER=1" if os.environ.get("OPTI_STOCK_LEGER") == "1"
@@ -435,8 +474,15 @@ def _modeles(request: Request) -> Modeles:
 
 
 @app.get("/sante")
-def sante() -> dict:
-    return {"statut": "ok"}
+def sante(request: Request) -> dict:
+    """Annonce ce que CE serveur sait faire. L'interface s'y fie pour masquer les boutons qui
+    n'aboutiraient à rien : un bouton qui répond 503 est pire qu'un bouton absent."""
+    m = getattr(request.app.state, "modeles", None)
+    return {
+        "statut": "ok",
+        "reconnaissance": bool(m is not None and len(m.labels_catalogue)),
+        "ocr": bool(m is not None and os.environ.get("OPTI_STOCK_SANS_OCR") != "1"),
+    }
 
 
 @app.get("/", include_in_schema=False)
