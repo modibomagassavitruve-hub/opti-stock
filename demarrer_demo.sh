@@ -34,7 +34,7 @@ if command -v caffeinate >/dev/null; then
   PID_VEILLE=$!
 fi
 
-command -v cloudflared >/dev/null || { echo "cloudflared manquant : brew install cloudflared"; exit 1; }
+command -v ngrok >/dev/null || { echo "ngrok manquant : brew install ngrok, puis ngrok config add-authtoken …"; exit 1; }
 
 echo "Démarrage de l'API (chargement du modèle, ~10 s)…"
 "$PYTHON" -m uvicorn app:app --host 127.0.0.1 --port "$PORT" --log-level warning &
@@ -47,13 +47,23 @@ done
 curl -sf "http://127.0.0.1:$PORT/sante" >/dev/null || { echo "L'API n'a pas démarré."; nettoyer; }
 echo "API prête."
 
-# Ouvre un tunnel et renvoie son adresse, ou vide si elle n'apparaît pas.
+# Ouvre le tunnel et renvoie son adresse, ou vide si elle n'apparaît pas.
+#
+# ngrok plutôt que cloudflared : les tunnels éphémères Cloudflare ont lâché trois fois en une
+# journée, puis ont fini par refuser de s'ouvrir du tout -- « Connection terminated » dès la
+# création, vraisemblablement une limite par adresse IP. ngrok, lui, est authentifié et son
+# offre gratuite donne un DOMAINE FIXE : l'adresse ne change plus d'un lancement à l'autre,
+# donc le QR imprimé la veille reste valable.
+#
+# Contrepartie assumée : ngrok interpose une page « Visit Site » au premier accès depuis un
+# navigateur. Un appui de plus pour l'opticien, contre une adresse qui ne bouge pas.
 ouvrir_tunnel() {
   : >"$JOURNAL_CF"
-  cloudflared tunnel --url "http://localhost:$PORT" >"$JOURNAL_CF" 2>&1 &
+  ngrok http "$PORT" --log=stdout >"$JOURNAL_CF" 2>&1 &
   PID_CF=$!
   for _ in $(seq 1 45); do
-    URL=$(grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" "$JOURNAL_CF" | head -1)
+    URL=$(curl -s --max-time 3 http://127.0.0.1:4040/api/tunnels 2>/dev/null \
+          | grep -oE "https://[a-z0-9.-]+\.ngrok[a-z.-]*\.(dev|io|app)" | head -1)
     [[ -n "$URL" ]] && return 0
     sleep 1
   done
@@ -79,6 +89,9 @@ PY
 
   Faites scanner le QR ci-dessus, ou ouvrez qr_demo.png en
   plein écran pour le montrer de loin.
+
+  Dites à l'opticien : « tapez sur Visit Site » — ngrok
+  interpose une page d'avertissement au premier accès.
 
   Laissez cette fenêtre ouverte : la fermer coupe tout.
   La mise en veille est déjà bloquée pendant ce temps.
