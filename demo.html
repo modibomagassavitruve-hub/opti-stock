@@ -504,6 +504,10 @@ function onglet(nom) {
  *  503, on les retire : un bouton absent s'explique, un bouton qui échoue fait douter de tout
  *  le reste. */
 function appliquerCapacites(c) {
+  // Un champ absent vaut « disponible » : une version d'API plus ancienne, ou une réponse
+  // tronquée, ne doit pas faire disparaître des fonctions qui marchent. On ne retire que ce
+  // que le serveur déclare explicitement indisponible.
+  c = { ocr: c.ocr !== false, reconnaissance: c.reconnaissance !== false };
   const etiquette = el('btnEtiquette');
   const reconnaissance = el('carteIdentifier');
   if (etiquette) {
