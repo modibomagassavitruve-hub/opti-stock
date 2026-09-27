@@ -868,7 +868,12 @@ let boutiques = JSON.parse(localStorage.getItem('opti_boutiques') || '[]');
 let activeId = localStorage.getItem('opti_active') || (boutiques[0] || {}).boutique || '';
 let conversationOuverte = null;
 
-const active = () => boutiques.find(b => b.boutique === activeId) || boutiques[0] || null;
+/** Aucun repli sur boutiques[0] : `activeId` vide signifie « personne n'est identifié », et
+ *  c'est ce qui fait apparaître l'accueil. Le repli qui était ici rendait le formulaire
+ *  d'inscription inatteignable dès qu'une boutique existait -- impossible d'en créer une
+ *  seconde ni de se connecter ailleurs, sans le moindre message d'erreur. Le repli au
+ *  démarrage se fait plus haut, une seule fois, en initialisant `activeId`. */
+const active = () => (activeId && boutiques.find(b => b.boutique === activeId)) || null;
 const jeton = () => (active() || {}).jeton || '';
 
 function memoriser() {
