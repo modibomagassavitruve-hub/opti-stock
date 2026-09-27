@@ -965,3 +965,18 @@ def test_reseau_moi_refuse_un_code_inconnu(reseau_vide):
     assert reseau_vide.get("/reseau/moi").status_code == 401
     assert reseau_vide.get("/reseau/moi",
                             headers={"X-Boutique-Jeton": "invente"}).status_code == 401
+
+
+# ------------------------------------------------- démarrage sans catalogue
+def test_mode_leger_sert_tout_sauf_la_reconnaissance(tmp_path, monkeypatch):
+    """Un serveur déployé depuis le dépôt public n'a pas de catalogue : il doit démarrer
+    quand même, parce que le parcours qui compte n'en a pas besoin."""
+    monkeypatch.setattr("easyocr.Reader", lambda *a, **k: type("R", (), {
+        "readtext": lambda self, *a, **k: ["RAY-BAN RB3025"]})())
+    m = app_module.charger_modeles_leger()
+
+    assert m.ocr(Image.new("RGB", (5, 5))) == "RAY-BAN RB3025"
+    assert len(m.labels_catalogue) == 0
+    with pytest.raises(app_module.HTTPException) as e:
+        m.embedder([Image.new("RGB", (5, 5))])
+    assert e.value.status_code == 503

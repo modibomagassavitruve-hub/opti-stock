@@ -1,3 +1,14 @@
+---
+title: Opti-Stock
+emoji: 👓
+colorFrom: green
+colorTo: blue
+sdk: docker
+app_port: 7860
+pinned: false
+license: mit
+---
+
 # Opti-Stock
 
 Gestion de stock pour opticiens : entrer une monture depuis son téléphone, la retrouver par
@@ -87,7 +98,7 @@ deux, et l'API avertit au démarrage si la tête est plus ancienne que le catalo
 
 ```bash
 docker build -t opti-stock .
-docker run -p 8000:8000 -v opti_journal:/journal opti-stock
+docker run -p 8000:7860 -v opti_journal:/journal opti-stock
 ```
 
 Le volume est indispensable : sans lui le journal disparaît à chaque redéploiement, et c'est

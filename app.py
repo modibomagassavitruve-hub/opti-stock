@@ -339,9 +339,56 @@ def _fiche_globale(monture: str) -> Path | None:
     return chemin if chemin.is_file() else None
 
 
+def charger_modeles_leger() -> Modeles:
+    """Tout sauf la reconnaissance par similarité : OCR d'étiquette, saisie, stock, inventaire
+    et réseau.
+
+    Ce que ça économise : le backbone FashionCLIP et le catalogue encodé, de loin le plus gros
+    poste mémoire. Ce que ça coûte : /identifier ne répond plus. Le compromis est bon pour un
+    serveur partagé où la reconnaissance n'a de toute façon rien à reconnaître -- une instance
+    déployée ne connaît pas le stock des opticiens qui s'y inscrivent, et le parcours qu'ils
+    utilisent (photographier, lire l'étiquette, saisir) n'en a pas besoin.
+
+    Activé par OPTI_STOCK_LEGER=1.
+    """
+    from easyocr import Reader
+
+    lecteur_ocr = Reader(["fr", "en"], gpu=False)
+
+    def indisponible(*_args, **_kwargs):
+        raise HTTPException(
+            status_code=503,
+            detail="Reconnaissance par photo indisponible sur ce serveur. La saisie, la "
+                   "lecture d'étiquette, le stock et l'inventaire fonctionnent normalement.")
+
+    return Modeles(
+        recadrer=lambda image: image,
+        embedder=indisponible,
+        tete=indisponible,
+        ocr=lambda image: " ".join(lecteur_ocr.readtext(np.array(image), detail=0,
+                                                         paragraph=False)),
+        marques_connues=[],
+        emb_catalogue=np.empty((0, 1), dtype="float32"),
+        labels_catalogue=np.array([]),
+    )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    app.state.modeles = CHARGEUR_MODELES()
+    # Sans catalogue, il n'y a rien à reconnaître : démarrer en léger plutôt que de refuser de
+    # démarrer. C'est le cas d'un serveur déployé depuis le dépôt public, qui ne porte pas les
+    # données d'une boutique -- et le parcours qui compte (saisir, lire l'étiquette, tenir son
+    # stock) n'a pas besoin du modèle.
+    catalogue = Path("data/catalogue.npz")
+    leger = os.environ.get("OPTI_STOCK_LEGER") == "1" or not catalogue.is_file()
+    if leger:
+        raison = ("OPTI_STOCK_LEGER=1" if os.environ.get("OPTI_STOCK_LEGER") == "1"
+                  else f"{catalogue} absent")
+        print(f"[léger] Reconnaissance par similarité désactivée ({raison}). "
+              f"Saisie, étiquette, stock, inventaire et réseau fonctionnent.")
+        app.state.modeles = charger_modeles_leger()
+    else:
+        app.state.modeles = CHARGEUR_MODELES()
     yield
 
 
