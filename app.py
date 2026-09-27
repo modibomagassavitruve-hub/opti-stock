@@ -339,6 +339,25 @@ def _fiche_globale(monture: str) -> Path | None:
     return chemin if chemin.is_file() else None
 
 
+# Marques courantes chez un opticien français. Elles servent à /lire-etiquette, qui reconnaît
+# une marque en comparant le texte lu à une liste : sans liste, l'OCR lit bien « OzEYEwEAR »
+# mais ne remplit pas le champ Marque -- le plus utile de la saisie.
+#
+# En temps normal cette liste vient du catalogue de la boutique. Un serveur partagé n'en a pas :
+# il accueille des opticiens dont il ne connaît pas le stock, et c'est justement là qu'une liste
+# générale sert. Elle n'a pas à être exhaustive : une marque absente se saisit à la main.
+MARQUES_COURANTES = [
+    "Ray-Ban", "Oakley", "Persol", "Vogue", "Carrera", "Police", "Vuarnet", "Julbo",
+    "Prada", "Gucci", "Dior", "Chanel", "Versace", "Armani", "Burberry", "Tom Ford",
+    "Marc Jacobs", "Hugo Boss", "Lacoste", "Nike", "Adidas", "Timberland", "Levi's",
+    "Lindberg", "Silhouette", "Etnia Barcelona", "Face à Face", "Anne et Valentin",
+    "Jean-François Rey", "Nathalie Blanc", "Naoned", "Caroline Abram", "Traction Productions",
+    "Morel", "Lafont", "Octika", "Gigi Studios", "Kaleos", "Woodys", "Parafina",
+    "Maritza", "Osmose", "Nemezis", "Ikaly", "Jarmon", "Kosmos", "Visionario",
+    "French Retro", "Oz Eyewear", "Talla", "Smash", "Exalto", "Minima", "Blackfin",
+]
+
+
 def charger_modeles_leger() -> Modeles:
     """Tout sauf la reconnaissance par similarité : OCR d'étiquette, saisie, stock, inventaire
     et réseau.
@@ -367,7 +386,7 @@ def charger_modeles_leger() -> Modeles:
         tete=indisponible,
         ocr=lambda image: " ".join(lecteur_ocr.readtext(np.array(image), detail=0,
                                                          paragraph=False)),
-        marques_connues=[],
+        marques_connues=MARQUES_COURANTES,
         emb_catalogue=np.empty((0, 1), dtype="float32"),
         labels_catalogue=np.array([]),
     )

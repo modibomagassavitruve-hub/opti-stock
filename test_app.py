@@ -980,3 +980,14 @@ def test_mode_leger_sert_tout_sauf_la_reconnaissance(tmp_path, monkeypatch):
     with pytest.raises(app_module.HTTPException) as e:
         m.embedder([Image.new("RGB", (5, 5))])
     assert e.value.status_code == 503
+
+
+def test_le_mode_leger_reconnait_les_marques_courantes():
+    """Sans catalogue, la liste des marques serait vide et le champ Marque -- le plus utile de
+    la saisie -- ne se remplirait jamais. Un serveur partagé accueille justement des opticiens
+    dont il ne connaît pas le stock."""
+    from parse_etiquette import parse_etiquette
+    for texte, attendue in [("OzEYEwEAR 134.95€ 8 0z", "Oz Eyewear"),
+                             ("RAY-BAN RB3025 001/51 58 14 135", "Ray-Ban"),
+                             ("LINDBERG 9707 n.o.w.", "Lindberg")]:
+        assert parse_etiquette(texte, app_module.MARQUES_COURANTES).marque == attendue
